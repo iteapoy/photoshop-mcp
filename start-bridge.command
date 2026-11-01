@@ -42,7 +42,13 @@ fi
 echo "Photoshop MCP 桥接启动中..."
 echo "Node   : $NODE"
 echo "端口   : $PORT"
+echo "工具模式: 分组（12 组 + action）；想恢复扁平 120 个工具，把 ~/.photoshop-mcp/tool-groups.json 的 enabled 改成 false"
 echo "如果 macOS 弹出「终端 想要控制 Adobe Photoshop 2021」，请点「好」"
 echo
 
-exec "$NODE" "$BRIDGE" --port "$PORT"
+FLAGS=()
+if [ "$PHOTOSHOP_MCP_FLAT" = "1" ]; then
+  FLAGS+=(--flat)
+fi
+
+exec "$NODE" "$BRIDGE" --port "$PORT" "${FLAGS[@]}"
