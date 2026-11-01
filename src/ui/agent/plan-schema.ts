@@ -1,8 +1,87 @@
 import type { ModelMessage } from 'ai';
+import { readFileSync, statSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 import { z } from 'zod';
 import type { PlanStepStatus, PlanView } from './shared.js';
 
 export const MAX_PLAN_STEPS = 20;
+
+// --- local patch (2026-11-01): tool filtering for the planner catalog ---
+// Hide tools the running Photoshop cannot execute, so they cost no prompt
+// tokens and the planner never picks them. Config lives outside the package
+// so it survives re-installs: ~/.photoshop-mcp/tool-filter.json
+const DEFAULT_DENYLIST = [
+  'photoshop_generative_fill',
+  'photoshop_generative_remove',
+  'photoshop_generative_expand',
+  'photoshop_generative_upscale',
+  'photoshop_generate_image',
+  'photoshop_sky_replacement',
+  'photoshop_neural_filter',
+  'photoshop_submit_feedback',
+];
+const FILTER_FILE = join(homedir(), '.photoshop-mcp', 'tool-filter.json');
+
+interface ToolFilterConfig {
+  denylist: string[];
+  slimSchema: boolean;
+  maxDescriptionChars: number;
+}
+
+let filterCache: ToolFilterConfig | undefined;
+let filterStamp = -1;
+
+export function getToolFilter(): ToolFilterConfig {
+  // Hot reload: re-read the json when its mtime changes, so tuning the
+  // filter does not require restarting the server.
+  let stamp = 0;
+  try {
+    stamp = statSync(FILTER_FILE).mtimeMs;
+  } catch {
+    stamp = 0;
+  }
+  if (filterCache && stamp === filterStamp) return filterCache;
+  const defaults: ToolFilterConfig = {
+    denylist: DEFAULT_DENYLIST,
+    slimSchema: false,
+    maxDescriptionChars: 0,
+  };
+  let next: ToolFilterConfig;
+  try {
+    const raw = JSON.parse(readFileSync(FILTER_FILE, 'utf8'));
+    next = { ...defaults, ...raw };
+  } catch {
+    next = defaults;
+  }
+  if (filterStamp !== -1 && stamp !== filterStamp) {
+    console.log(`[tool-filter] reloaded ${FILTER_FILE} (denylist ${next.denylist?.length ?? 0})`);
+  }
+  filterCache = next;
+  filterStamp = stamp;
+  return next;
+}
+
+export function filterToolSet<T extends Record<string, unknown>>(tools: T): T {
+  const deny = new Set(getToolFilter().denylist ?? []);
+  return Object.fromEntries(
+    Object.entries(tools).filter(([name]) => !deny.has(name))
+  ) as T;
+}
+
+/** Drop param-level descriptions/titles to shrink the catalog (lossy). */
+function slimJsonSchema(node: unknown): unknown {
+  if (Array.isArray(node)) return node.map(slimJsonSchema);
+  if (node && typeof node === 'object') {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(node as Record<string, unknown>)) {
+      if (k === 'description' || k === 'title' || k === '$schema' || k === 'examples') continue;
+      out[k] = slimJsonSchema(v);
+    }
+    return out;
+  }
+  return node;
+}
 
 const rationaleField = z
   .string()
@@ -89,18 +168,30 @@ export function toPartialPlanView(partial: Partial<Plan>): PlanView {
 }
 
 export function buildToolCatalog(tools: Record<string, CatalogTool>): string {
+  const cfg = getToolFilter();
+  const deny = new Set(cfg.denylist ?? []);
+  const maxDesc = cfg.maxDescriptionChars > 0 ? cfg.maxDescriptionChars : 0;
   const lines: string[] = [];
+  let hidden = 0;
   for (const [name, tool] of Object.entries(tools)) {
-    const desc = (tool.description ?? '').replace(/\s+/g, ' ').trim();
+    if (deny.has(name)) {
+      hidden++;
+      continue;
+    }
+    let desc = (tool.description ?? '').replace(/\s+/g, ' ').trim();
+    if (maxDesc && desc.length > maxDesc) desc = `${desc.slice(0, maxDesc)}…`;
     let params = '';
     try {
       const schema = tool.inputSchema as { jsonSchema?: unknown } | undefined;
       const json = schema?.jsonSchema ?? schema;
-      if (json) params = JSON.stringify(json);
+      if (json) params = JSON.stringify(cfg.slimSchema ? slimJsonSchema(json) : json);
     } catch {
       params = '';
     }
     lines.push(`- ${name}: ${desc}${params ? `\n  params: ${params}` : ''}`);
+  }
+  if (hidden > 0) {
+    process.stderr.write(`[tool-filter] catalog: ${lines.length} tools (${hidden} hidden)\n`);
   }
   return lines.join('\n');
 }

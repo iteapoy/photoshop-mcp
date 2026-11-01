@@ -5,6 +5,7 @@ import type { ProviderAdapter } from '../providers/registry.js';
 import type { AuthMethod } from '../providers/types.js';
 import type { ModelMessage } from 'ai';
 import { buildSpawnArgs, buildUiMcpChildEnv } from './mcp-transport.js';
+import { filterToolSet } from './plan-schema.js';
 import {
   computeCost,
   finishToolCall,
@@ -43,7 +44,7 @@ export async function* runChatViaApiKey(
       }),
     });
 
-    const tools = await mcp.tools();
+    const tools = filterToolSet(await mcp.tools());
 
     const result = streamText({
       model: opts.provider.getLanguageModel({
