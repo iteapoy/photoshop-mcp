@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { ExtendScriptSnippets } from '../src/api/extendscript.js';
 import { parsePreviewScriptPayload } from '../src/apps/preview-result.js';
+import { createLayerTransformTools } from '../src/tools/layer-transform-tools.js';
+import { createLayerOrderingTools } from '../src/tools/layer-ordering-tools.js';
+import { createLayerPropertiesTools } from '../src/tools/layer-properties-tools.js';
+import { createStyleTools } from '../src/tools/style-tools.js';
 
 describe('layer targeting without selecting first', () => {
   it('resolves the layer by name for visibility', () => {
@@ -97,5 +102,107 @@ describe('single-layer preview', () => {
     });
     expect(parsed?.layerName).toBeUndefined();
     expect(parsed?.cropped).toBe(false);
+  });
+});
+
+describe('single-layer tools advertise layer_name', () => {
+  const connection = null as never;
+  const tools = [
+    ...createLayerTransformTools(connection),
+    ...createLayerOrderingTools(connection),
+    ...createLayerPropertiesTools(connection),
+    ...createStyleTools(connection),
+  ];
+  const schemas = new Map(tools.map((t) => [t.tool.name, t.tool.inputSchema]));
+
+  const SINGLE_LAYER_TOOLS = [
+    'photoshop_fit_layer_to_document',
+    'photoshop_scale_layer',
+    'photoshop_move_layer',
+    'photoshop_rotate_layer',
+    'photoshop_move_layer_to_position',
+    'photoshop_move_layer_to_top',
+    'photoshop_move_layer_to_bottom',
+    'photoshop_move_layer_up',
+    'photoshop_move_layer_down',
+    'photoshop_rasterize_layer',
+    'photoshop_duplicate_layer',
+    'photoshop_apply_layer_style',
+  ];
+
+  it.each(SINGLE_LAYER_TOOLS)('%s takes an optional layer_name', (name) => {
+    const schema = schemas.get(name) as
+      { properties?: Record<string, { type?: string }>; required?: string[] } | undefined;
+    expect(schema, `${name} is not registered`).toBeDefined();
+    expect(schema?.properties?.layer_name?.type).toBe('string');
+    // Never required: omitting it keeps the old "act on the active layer" path.
+    expect(schema?.required ?? []).not.toContain('layer_name');
+  });
+});
+
+describe('transforms and stacking resolve the layer by name', () => {
+  const cases: Array<[string, string]> = [
+    ['fit_layer_to_document', ExtendScriptSnippets.fitLayerToDocument(false, 'Rail')],
+    ['scale_layer', ExtendScriptSnippets.scaleLayer(50, true, 'Rail')],
+    ['move_layer', ExtendScriptSnippets.moveLayer(10, -20, 'Rail')],
+    ['rotate_layer', ExtendScriptSnippets.rotateLayer(15, 'Rail')],
+    ['move_layer_to_position', ExtendScriptSnippets.moveLayerToPosition('Base', 'ABOVE', 'Rail')],
+    ['move_layer_to_top', ExtendScriptSnippets.moveLayerToTop('Rail')],
+    ['move_layer_to_bottom', ExtendScriptSnippets.moveLayerToBottom('Rail')],
+    ['move_layer_up', ExtendScriptSnippets.moveLayerUp('Rail')],
+    ['move_layer_down', ExtendScriptSnippets.moveLayerDown('Rail')],
+    ['rasterize_layer', ExtendScriptSnippets.rasterizeLayer('Rail')],
+    ['duplicate_layer', ExtendScriptSnippets.duplicateLayer(undefined, 'Rail')],
+    [
+      'apply_layer_style',
+      ExtendScriptSnippets.applyLayerStyle({
+        style: 'drop_shadow',
+        red: 0,
+        green: 0,
+        blue: 0,
+        opacity: 60,
+        size: 10,
+        distance: 8,
+        angle: 120,
+        layerName: 'Rail',
+      }),
+    ],
+  ];
+
+  it.each(cases)('%s addresses "Rail" without selecting it first', (_label, jsx) => {
+    expect(jsx).toContain('__mcp_resolveLayer(doc, "Rail", 0)');
+    expect(() => new Function(jsx)).not.toThrow();
+  });
+
+  it('falls back to the active layer when no name is given', () => {
+    for (const jsx of [
+      ExtendScriptSnippets.scaleLayer(50),
+      ExtendScriptSnippets.moveLayer(1, 1),
+      ExtendScriptSnippets.rotateLayer(5),
+      ExtendScriptSnippets.fitLayerToDocument(true),
+      ExtendScriptSnippets.rasterizeLayer(),
+      ExtendScriptSnippets.duplicateLayer(),
+      ExtendScriptSnippets.moveLayerUp(),
+    ]) {
+      expect(jsx).toContain('__mcp_resolveLayer(doc, "", 0)');
+    }
+  });
+
+  it('reorders inside the layer own group, not the whole document', () => {
+    for (const jsx of [
+      ExtendScriptSnippets.moveLayerUp('Rail'),
+      ExtendScriptSnippets.moveLayerDown('Rail'),
+    ]) {
+      expect(jsx).toContain('__mcp_parentOf(doc, layer)');
+      expect(jsx).toContain('__mcp_siblingIndex(parent, layer)');
+    }
+  });
+});
+
+describe('get_layers payload', () => {
+  it('returns plain JSON with no text prefix', () => {
+    const src = readFileSync(new URL('../src/tools/layer-tools.ts', import.meta.url), 'utf8');
+    expect(src).not.toContain('Layers:\\n');
+    expect(src).toContain('JSON.stringify(result, null, 2)');
   });
 });

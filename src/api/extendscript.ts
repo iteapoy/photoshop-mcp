@@ -76,6 +76,45 @@ function __mcp_hideAll(container) {
   } catch (eS) {}
 }
 
+/** Compare two layer references by id — DOM proxies are not always ===. */
+function __mcp_sameLayer(a, b) {
+  if (!a || !b) return false;
+  try { return String(a.id) === String(b.id); } catch (eId) {}
+  return a === b;
+}
+
+/**
+ * Container that holds the target layer (the document or a layer group).
+ * Stack-order tools need the siblings of the layer own group, otherwise a
+ * layer inside a group looks like "already at the top" of the whole document.
+ */
+function __mcp_parentOf(container, target) {
+  if (!container || !target) return null;
+  try {
+    for (var i = 0; i < container.layers.length; i++) {
+      if (__mcp_sameLayer(container.layers[i], target)) return container;
+    }
+  } catch (eL) {}
+  try {
+    for (var j = 0; j < container.layerSets.length; j++) {
+      if (__mcp_sameLayer(container.layerSets[j], target)) return container;
+      var nested = __mcp_parentOf(container.layerSets[j], target);
+      if (nested) return nested;
+    }
+  } catch (eS) {}
+  return null;
+}
+
+/** Index of the target layer inside container.layers, or -1. */
+function __mcp_siblingIndex(container, target) {
+  try {
+    for (var i = 0; i < container.layers.length; i++) {
+      if (__mcp_sameLayer(container.layers[i], target)) return i;
+    }
+  } catch (eIdx) {}
+  return -1;
+}
+
 function __mcp_resolveLayer(doc, name, index) {
   if (name) {
     var found = __mcp_findLayer(doc, name);
@@ -2002,16 +2041,19 @@ export const ExtendScriptSnippets = {
   `,
 
   /**
-   * Scale active layer to fit document (maintain aspect ratio)
+   * Scale a layer to fit document (maintain aspect ratio).
+   * Targets `layerName` when given, otherwise the active layer.
    */
-  fitLayerToDocument: (fillDocument = false) => `
+  fitLayerToDocument: (fillDocument = false, layerName = '') => `
+    ${helperFunctions}
     ${getContextInfo}
-    
+    ${layerTargetHelpers}
+
     if (app.documents.length === 0) {
       throw new Error('No active document');
     }
     var doc = app.activeDocument;
-    var layer = doc.activeLayer;
+    var layer = __mcp_resolveLayer(doc, "${jsString(layerName)}", 0);
     
     if (layer.isBackgroundLayer) {
       throw new Error('Cannot transform background layer');
@@ -2025,7 +2067,11 @@ export const ExtendScriptSnippets = {
     var bounds = layer.bounds;
     var layerWidth = bounds[2].as('px') - bounds[0].as('px');
     var layerHeight = bounds[3].as('px') - bounds[1].as('px');
-    
+
+    if (!(layerWidth > 0) || !(layerHeight > 0)) {
+      throw new Error('Layer has no pixels (empty bounding rectangle). Fill the layer before fitting it.');
+    }
+
     // Calculate scale ratios
     var widthRatio = canvasWidth / layerWidth;
     var heightRatio = canvasHeight / layerHeight;
@@ -2052,6 +2098,7 @@ export const ExtendScriptSnippets = {
     
     var result = {
       fitted: true,
+      layerName: layer.name,
       mode: ${fillDocument} ? 'fill' : 'fit',
       originalSize: { width: layerWidth, height: layerHeight },
       newSize: { 
@@ -2066,14 +2113,17 @@ export const ExtendScriptSnippets = {
   `,
 
   /**
-   * Scale active layer by percentage
+   * Scale a layer by percentage. Targets `layerName` when given, else the active layer.
    */
-  scaleLayer: (scalePercent: number, centerAnchor = true) => `
+  scaleLayer: (scalePercent: number, centerAnchor = true, layerName = '') => `
+    ${helperFunctions}
+    ${layerTargetHelpers}
+
     if (app.documents.length === 0) {
       throw new Error('No active document');
     }
     var doc = app.activeDocument;
-    var layer = doc.activeLayer;
+    var layer = __mcp_resolveLayer(doc, "${jsString(layerName)}", 0);
     
     if (layer.isBackgroundLayer) {
       throw new Error('Cannot transform background layer');
@@ -2096,19 +2146,23 @@ export const ExtendScriptSnippets = {
     
     return { 
       scaled: true,
-      percent: ${scalePercent}
+      percent: ${scalePercent},
+      layerName: layer.name
     };
   `,
 
   /**
-   * Move/translate active layer
+   * Move/translate a layer. Targets `layerName` when given, else the active layer.
    */
-  moveLayer: (deltaX: number, deltaY: number) => `
+  moveLayer: (deltaX: number, deltaY: number, layerName = '') => `
+    ${helperFunctions}
+    ${layerTargetHelpers}
+
     if (app.documents.length === 0) {
       throw new Error('No active document');
     }
     var doc = app.activeDocument;
-    var layer = doc.activeLayer;
+    var layer = __mcp_resolveLayer(doc, "${jsString(layerName)}", 0);
     
     if (layer.isBackgroundLayer) {
       throw new Error('Cannot move background layer');
@@ -2119,19 +2173,23 @@ export const ExtendScriptSnippets = {
     return { 
       moved: true,
       deltaX: ${deltaX},
-      deltaY: ${deltaY}
+      deltaY: ${deltaY},
+      layerName: layer.name
     };
   `,
 
   /**
-   * Rotate active layer
+   * Rotate a layer. Targets `layerName` when given, else the active layer.
    */
-  rotateLayer: (degrees: number) => `
+  rotateLayer: (degrees: number, layerName = '') => `
+    ${helperFunctions}
+    ${layerTargetHelpers}
+
     if (app.documents.length === 0) {
       throw new Error('No active document');
     }
     var doc = app.activeDocument;
-    var layer = doc.activeLayer;
+    var layer = __mcp_resolveLayer(doc, "${jsString(layerName)}", 0);
     
     if (layer.isBackgroundLayer) {
       throw new Error('Cannot rotate background layer');
@@ -2141,7 +2199,8 @@ export const ExtendScriptSnippets = {
     
     return { 
       rotated: true,
-      degrees: ${degrees}
+      degrees: ${degrees},
+      layerName: layer.name
     };
   `,
 
@@ -2290,26 +2349,29 @@ export const ExtendScriptSnippets = {
   `,
 
   /**
-   * Duplicate active layer.
+   * Duplicate a layer (by name, or the active one).
    *
    * DOM layer.duplicate() does NOT activate the duplicate — the original
    * layer stays active, so without the explicit activeLayer assignment any
    * follow-up active-layer tool (masks, filters, transforms) would target
    * the original instead of the copy.
    */
-  duplicateLayer: (newName?: string) => `
+  duplicateLayer: (newName?: string, layerName = '') => `
+    ${helperFunctions}
+    ${layerTargetHelpers}
+
     if (app.documents.length === 0) {
       throw new Error('No active document');
     }
     var doc = app.activeDocument;
-    var layer = doc.activeLayer;
+    var layer = __mcp_resolveLayer(doc, "${jsString(layerName)}", 0);
     
     var duplicated = layer.duplicate();
     ${newName ? `duplicated.name = "${jsString(newName)}";` : ''}
     doc.activeLayer = duplicated;
     
     var result = {
-      originalName: layer.name,
+      originalName: String(layer.name),
       newName: duplicated.name,
       activated: true
     };
@@ -3617,13 +3679,18 @@ export const ExtendScriptSnippets = {
   /**
    * Rasterize active layer
    */
-  rasterizeLayer: () => `
+  rasterizeLayer: (layerName = '') => `
     ${helperFunctions}
+    ${layerTargetHelpers}
 
     if (app.documents.length === 0) {
       throw new Error('No active document');
     }
-    var layer = app.activeDocument.activeLayer;
+    var doc = app.activeDocument;
+    var layer = __mcp_resolveLayer(doc, "${jsString(layerName)}", 0);
+    // The Action Manager paths below target the active layer, so make the
+    // resolved layer active first; the DOM path works either way.
+    try { doc.activeLayer = layer; } catch (eActivate) {}
 
     if (layer.typename === 'LayerSet') {
       throw new Error('Cannot rasterize a layer group — select a single layer');
@@ -3633,6 +3700,7 @@ export const ExtendScriptSnippets = {
     if (layer.kind === LayerKind.NORMAL) {
       return {
         message: 'Layer is already rasterized',
+        layerName: layer.name,
         kind: 'NORMAL'
       };
     }
@@ -3659,6 +3727,7 @@ export const ExtendScriptSnippets = {
 
     return {
       rasterized: true,
+      layerName: layer.name,
       originalKind: originalKind,
       newKind: 'NORMAL'
     };
@@ -3787,28 +3856,28 @@ export const ExtendScriptSnippets = {
   `,
 
   /**
-   * Move layer to specific position (reorder)
+   * Move a layer to a position relative to another layer (reorder).
+   * Both the moving layer and the target can be addressed by name.
    */
-  moveLayerToPosition: (targetLayerName: string, position: string) => `
+  moveLayerToPosition: (targetLayerName: string, position: string, layerName = '') => `
+    ${helperFunctions}
     ${getContextInfo}
+    ${layerTargetHelpers}
     
     if (app.documents.length === 0) {
       throw new Error('No active document');
     }
     var doc = app.activeDocument;
-    var activeLayer = doc.activeLayer;
+    var activeLayer = __mcp_resolveLayer(doc, "${jsString(layerName)}", 0);
     
-    // Find target layer
-    var targetLayer = null;
-    for (var i = 0; i < doc.layers.length; i++) {
-      if (doc.layers[i].name === "${jsString(targetLayerName)}") {
-        targetLayer = doc.layers[i];
-        break;
-      }
-    }
+    // Find target layer (nested groups included)
+    var targetLayer = __mcp_findLayer(doc, "${jsString(targetLayerName)}");
     
     if (!targetLayer) {
-      throw new Error('Target layer not found: ${targetLayerName}');
+      throw new Error('Target layer not found: ${jsString(targetLayerName)}');
+    }
+    if (__mcp_sameLayer(activeLayer, targetLayer)) {
+      throw new Error('Cannot move a layer relative to itself');
     }
     
     // Determine ElementPlacement
@@ -3839,19 +3908,32 @@ export const ExtendScriptSnippets = {
   `,
 
   /**
-   * Move layer to top of layer stack
+   * Move a layer to the top of its own group (or the document).
    */
-  moveLayerToTop: () => `
+  moveLayerToTop: (layerName = '') => `
+    ${helperFunctions}
     ${getContextInfo}
+    ${layerTargetHelpers}
     
     if (app.documents.length === 0) {
       throw new Error('No active document');
     }
     var doc = app.activeDocument;
-    var layer = doc.activeLayer;
-    
-    if (doc.layers.length > 0) {
-      layer.move(doc.layers[0], ElementPlacement.PLACEBEFORE);
+    var layer = __mcp_resolveLayer(doc, "${jsString(layerName)}", 0);
+    var parent = __mcp_parentOf(doc, layer) || doc;
+    var index = __mcp_siblingIndex(parent, layer);
+
+    if (index === 0) {
+      return {
+        moved: false,
+        message: 'Layer is already at the top',
+        layerName: layer.name,
+        context: getContextInfo()
+      };
+    }
+
+    if (parent.layers.length > 0) {
+      layer.move(parent.layers[0], ElementPlacement.PLACEBEFORE);
     }
     
     var result = {
@@ -3864,24 +3946,43 @@ export const ExtendScriptSnippets = {
   `,
 
   /**
-   * Move layer to bottom of layer stack
+   * Move a layer to the bottom of its own group (or the document).
    */
-  moveLayerToBottom: () => `
+  moveLayerToBottom: (layerName = '') => `
+    ${helperFunctions}
     ${getContextInfo}
+    ${layerTargetHelpers}
     
     if (app.documents.length === 0) {
       throw new Error('No active document');
     }
     var doc = app.activeDocument;
-    var layer = doc.activeLayer;
+    var layer = __mcp_resolveLayer(doc, "${jsString(layerName)}", 0);
 
     if (layer.isBackgroundLayer) {
       throw new Error('Cannot move background layer');
     }
 
-    if (doc.layers.length > 0) {
-      var bottomLayer = doc.layers[doc.layers.length - 1];
-      layer.move(bottomLayer, ElementPlacement.PLACEBEFORE);
+    var parent = __mcp_parentOf(doc, layer) || doc;
+    var index = __mcp_siblingIndex(parent, layer);
+
+    if (index === parent.layers.length - 1) {
+      return {
+        moved: false,
+        message: 'Layer is already at the bottom',
+        layerName: layer.name,
+        context: getContextInfo()
+      };
+    }
+
+    if (parent.layers.length > 0) {
+      var bottomLayer = parent.layers[parent.layers.length - 1];
+      // The background cannot have anything below it — sit right above instead.
+      var placement = ElementPlacement.PLACEAFTER;
+      try {
+        if (bottomLayer.isBackgroundLayer) placement = ElementPlacement.PLACEBEFORE;
+      } catch (eBg) {}
+      layer.move(bottomLayer, placement);
     }
     
     var result = {
@@ -3894,36 +3995,35 @@ export const ExtendScriptSnippets = {
   `,
 
   /**
-   * Move layer up one position
+   * Move a layer up one position inside its own group.
    */
-  moveLayerUp: () => `
+  moveLayerUp: (layerName = '') => `
+    ${helperFunctions}
     ${getContextInfo}
+    ${layerTargetHelpers}
     
     if (app.documents.length === 0) {
       throw new Error('No active document');
     }
     var doc = app.activeDocument;
-    var layer = doc.activeLayer;
+    var layer = __mcp_resolveLayer(doc, "${jsString(layerName)}", 0);
+    var parent = __mcp_parentOf(doc, layer) || doc;
+    var currentIndex = __mcp_siblingIndex(parent, layer);
     
-    // Find current layer index
-    var currentIndex = -1;
-    for (var i = 0; i < doc.layers.length; i++) {
-      if (doc.layers[i] === layer) {
-        currentIndex = i;
-        break;
-      }
-    }
-    
-    if (currentIndex <= 0) {
+    if (currentIndex === 0) {
       return {
         moved: false,
         message: 'Layer is already at the top',
+        layerName: layer.name,
         context: getContextInfo()
       };
     }
+    if (currentIndex < 0) {
+      throw new Error('Layer is not a direct child of its container');
+    }
     
     // Move before the layer above
-    layer.move(doc.layers[currentIndex - 1], ElementPlacement.PLACEBEFORE);
+    layer.move(parent.layers[currentIndex - 1], ElementPlacement.PLACEBEFORE);
     
     var result = {
       moved: true,
@@ -3935,36 +4035,32 @@ export const ExtendScriptSnippets = {
   `,
 
   /**
-   * Move layer down one position
+   * Move a layer down one position inside its own group.
    */
-  moveLayerDown: () => `
+  moveLayerDown: (layerName = '') => `
+    ${helperFunctions}
     ${getContextInfo}
+    ${layerTargetHelpers}
     
     if (app.documents.length === 0) {
       throw new Error('No active document');
     }
     var doc = app.activeDocument;
-    var layer = doc.activeLayer;
+    var layer = __mcp_resolveLayer(doc, "${jsString(layerName)}", 0);
+    var parent = __mcp_parentOf(doc, layer) || doc;
+    var currentIndex = __mcp_siblingIndex(parent, layer);
     
-    // Find current layer index
-    var currentIndex = -1;
-    for (var i = 0; i < doc.layers.length; i++) {
-      if (doc.layers[i] === layer) {
-        currentIndex = i;
-        break;
-      }
-    }
-    
-    if (currentIndex === -1 || currentIndex >= doc.layers.length - 1) {
+    if (currentIndex === -1 || currentIndex >= parent.layers.length - 1) {
       return {
         moved: false,
         message: 'Layer is already at the bottom',
+        layerName: layer.name,
         context: getContextInfo()
       };
     }
     
     // Move after the layer below
-    layer.move(doc.layers[currentIndex + 1], ElementPlacement.PLACEAFTER);
+    layer.move(parent.layers[currentIndex + 1], ElementPlacement.PLACEAFTER);
     
     var result = {
       moved: true,
@@ -4506,8 +4602,9 @@ export const ExtendScriptSnippets = {
     size: number;
     distance: number;
     angle: number;
+    layerName?: string;
   }) => {
-    const { style, red, green, blue, opacity, size, distance, angle } = options;
+    const { style, red, green, blue, opacity, size, distance, angle, layerName = '' } = options;
     let styleDescriptor: string;
     if (style === 'drop_shadow') {
       styleDescriptor = `
@@ -4574,11 +4671,16 @@ export const ExtendScriptSnippets = {
     }
     return `
     ${helperFunctions}
+    ${layerTargetHelpers}
 
     if (app.documents.length === 0) {
       throw new Error('No active document');
     }
     var doc = app.activeDocument;
+    // Layer effects are applied through the target layer reference, so make
+    // the resolved layer active first.
+    var targetLayer = __mcp_resolveLayer(doc, "${jsString(layerName)}", 0);
+    try { doc.activeLayer = targetLayer; } catch (eActivate) {}
     app.displayDialogs = DialogModes.NO;
 
     var rgb = new ActionDescriptor();
@@ -4601,7 +4703,7 @@ export const ExtendScriptSnippets = {
     return {
       applied: true,
       style: '${style}',
-      layer_name: doc.activeLayer.name
+      layer_name: targetLayer.name
     };
   `;
   },

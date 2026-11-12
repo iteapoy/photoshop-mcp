@@ -7,12 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `layer_name` on every remaining single-layer tool: `fit_layer_to_document`, `scale_layer`, `move_layer`, `rotate_layer`, `move_layer_to_position` (the moving layer), `move_layer_to_top/_to_bottom/_up/_down`, `rasterize_layer`, `duplicate_layer`, `apply_layer_style`. That closes the "select first, then edit" gap — a transform or effect can no longer land on whatever layer happened to be active.
+
 ### Changed
 
 - HTTP bridge: one calling convention instead of two. `photoshop_call` now takes `{ tool, params }` — the same key as a group tool — and a single `extractCall()` backs both entry points, so `params`/`arguments`/`args` and flat siblings all resolve the same way. The flat 120-tool surface is gone (no `--flat`, no `"enabled": false`): the grouped surface is the only shape the bridge exposes, and an unknown tool name now returns the group list instead of silently forwarding.
 
 ### Fixed
 
+- `photoshop_get_layers` returns plain JSON. The `Layers:` prefix forced every programmatic caller to strip it before parsing; a tool message that is a payload no longer carries a text label.
+- `photoshop_move_layer_up/_down/_to_top/_to_bottom` use the layer's own group for stack order and compare layers by id. A layer inside a group used to report "already at the top/bottom" because the index came from `document.layers`; `_to_bottom` also stops right above the background instead of trying to move below it.
 - `photoshop_get_preview` with `layer_name` actually works. The preview copy was made with `duplicate(name, true)`, which merges every layer, so the solo step could never find the layer and the tool failed with `layer_not_found`. The copy is no longer merged, and it is closed in a `finally` — a failed solo used to leave a stray `__mcp_preview__` document open in the workspace.
 - Nested `params` wrappers are spliced at any depth, not just three levels, with a seen-set so a self-referencing payload cannot spin. The old "nested too deep" hint is gone; a wrapper that survives is reported as a wrapper (not a field) rather than as an unknown parameter.
 - `photoshop_place_image` anchors on the real image rectangle. Photoshop reports `layer.bounds` as the non-transparent content box for PNGs with transparent margins, which used to shift the layer by the trim size. The tool now measures the source, detects which bounds it received (`boundsMode`), and compensates by the trim insets. Adds `anchor`, `scale`, `fit_to_canvas` and `rasterize`.

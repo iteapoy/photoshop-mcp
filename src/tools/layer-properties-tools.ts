@@ -3,30 +3,31 @@ import { PhotoshopConnection } from '../platform/connection.js';
 import { PhotoshopAPIFactory } from '../api/photoshop-api.js';
 import { ExtendScriptSnippets } from '../api/extendscript.js';
 import { LAYER_BLEND_MODE_ENUM, resolveLayerBlendMode } from './blend-mode.js';
+import { LAYER_NAME_PROPERTY, layerName } from './layer-target.js';
 
-/**
- * Optional layer selector shared by the layer-property tools. Editing by name
- * removes the "select first, then edit" round trip — and the silent risk of
- * editing whatever happened to be active.
- */
-const LAYER_NAME_PROPERTY = {
-  type: 'string',
-  description:
-    'Target layer by name (searches nested groups). Omit or leave empty to act on the active layer.',
-} as const;
+/** Re-exported so existing imports keep working. */
+export { LAYER_NAME_PROPERTY, layerName } from './layer-target.js';
 
 export function createLayerPropertiesTools(connection: PhotoshopConnection): ToolDefinition[] {
   return [
     {
       tool: {
         name: 'photoshop_rasterize_layer',
-        description: 'Rasterize the active layer (convert text/smart object to normal layer)',
+        description:
+          'Rasterize a layer, converting text or a smart object to a normal pixel layer. Pass layer_name to target a layer directly, otherwise the active layer is used.\n\n' +
+          'Use when: a filter, fill, or transform needs real pixels (text and smart objects cannot take most filters).\n' +
+          'Do NOT use when: the text stays editable — restyle it with photoshop_set_text_color / photoshop_execute_script instead.\n' +
+          'Do NOT use when: the layer is already NORMAL — the call is a no-op that reports it.\n\n' +
+          'Returns: rasterized, layerName, originalKind, newKind.\n' +
+          'Preconditions: active document and a single (non-group) layer. Side effects: irreversible content change (text becomes pixels); makes the layer active. Undo restores the previous state.',
         inputSchema: {
           type: 'object',
-          properties: {},
+          properties: {
+            layer_name: { ...LAYER_NAME_PROPERTY },
+          },
         },
       },
-      handler: async () => rasterizeLayer(connection),
+      handler: async (args) => rasterizeLayer(connection, args),
     },
     {
       tool: {
@@ -153,8 +154,11 @@ export function createLayerPropertiesTools(connection: PhotoshopConnection): Too
       tool: {
         name: 'photoshop_duplicate_layer',
         description:
-          'Duplicate the active layer. The duplicate becomes the active layer; ' +
-          'returns its name and, when available, its layer id.',
+          'Duplicate a layer. Pass layer_name to copy a specific layer, otherwise the active layer is copied. ' +
+          'The duplicate becomes the active layer; returns its name and, when available, its layer id.\n\n' +
+          'Use when: a copy should be edited without touching the original (Layer via Copy).\n' +
+          'Do NOT use when: a linked instance is wanted — use photoshop_smart_object_convert instead.\n\n' +
+          'Preconditions: active document and one layer. Side effects: adds a layer and changes the active layer. Reversible with photoshop_undo.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -162,6 +166,7 @@ export function createLayerPropertiesTools(connection: PhotoshopConnection): Too
               type: 'string',
               description: 'Name for the duplicated layer (optional)',
             },
+            layer_name: { ...LAYER_NAME_PROPERTY },
           },
         },
       },
@@ -396,7 +401,7 @@ async function duplicateLayer(
     const apiFactory = new PhotoshopAPIFactory(connection);
     const api = await apiFactory.createAPI();
 
-    const script = ExtendScriptSnippets.duplicateLayer(newName);
+    const script = ExtendScriptSnippets.duplicateLayer(newName, layerName(args));
     const result = await api.executeScript(script);
 
     return {
@@ -478,12 +483,15 @@ async function flattenImage(connection: PhotoshopConnection): Promise<ToolResult
   }
 }
 
-async function rasterizeLayer(connection: PhotoshopConnection): Promise<ToolResult> {
+async function rasterizeLayer(
+  connection: PhotoshopConnection,
+  args: Record<string, unknown> = {}
+): Promise<ToolResult> {
   try {
     const apiFactory = new PhotoshopAPIFactory(connection);
     const api = await apiFactory.createAPI();
 
-    const script = ExtendScriptSnippets.rasterizeLayer();
+    const script = ExtendScriptSnippets.rasterizeLayer(layerName(args));
     const result = await api.executeScript(script);
 
     return {
@@ -505,10 +513,4 @@ async function rasterizeLayer(connection: PhotoshopConnection): Promise<ToolResu
       isError: true,
     };
   }
-}
-
-/** `layer_name` argument, or '' for "use the active layer". */
-function layerName(args: Record<string, unknown>): string {
-  const raw = args.layer_name;
-  return typeof raw === 'string' ? raw.trim() : '';
 }

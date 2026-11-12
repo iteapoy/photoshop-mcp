@@ -311,10 +311,11 @@ photoshop_rename_layer({ name: "Hero Image" })
 ```
 
 #### `photoshop_duplicate_layer`
-Duplicate the active layer.
+Duplicate a layer. The copy becomes the active layer.
 
 **Parameters:**
 - `newName` (string, optional): Name for duplicated layer
+- `layer_name` (string, optional): Target layer by name (searches nested groups). Omit to act on the active layer.
 
 ```javascript
 // Example: Duplicate layer with new name
@@ -338,21 +339,28 @@ photoshop_flatten_image()
 ```
 
 #### `photoshop_rasterize_layer`
-Rasterize the active layer (convert text/smart object to normal layer).
+Rasterize a layer (convert text/smart object to normal layer).
+
+**Parameters:**
+- `layer_name` (string, optional): Target layer by name (searches nested groups). Omit to act on the active layer.
 
 ```javascript
 // Example: Rasterize layer
 photoshop_rasterize_layer()
+
+// Example: rasterize a named layer without selecting it
+photoshop_rasterize_layer({ layer_name: "Title" })
 ```
 
 ### Layer Ordering
 
 #### `photoshop_move_layer_to_position`
-Move the active layer relative to another layer.
+Move a layer relative to another layer.
 
 **Parameters:**
 - `targetLayerName` (string, required): Name of the reference layer
 - `position` (string, required): ABOVE, BELOW, TOP, or BOTTOM
+- `layer_name` (string, optional): Target layer by name (searches nested groups). Omit to act on the active layer.
 
 ```javascript
 // Example: Move layer above "Background"
@@ -363,44 +371,69 @@ photoshop_move_layer_to_position({
 ```
 
 #### `photoshop_move_layer_to_top`
-Move the active layer to the top of the layer stack.
+Move a layer to the top of its own group (or of the document).
+
+**Parameters:**
+- `layer_name` (string, optional): Target layer by name (searches nested groups). Omit to act on the active layer.
 
 ```javascript
 // Example: Move to top
 photoshop_move_layer_to_top()
+
+// Example: target a named layer
+photoshop_move_layer_to_top({ layer_name: "透视辅助线" })
 ```
 
 #### `photoshop_move_layer_to_bottom`
-Move the active layer to the bottom of the layer stack.
+Move a layer to the bottom of its own group (or of the document).
+
+**Parameters:**
+- `layer_name` (string, optional): Target layer by name (searches nested groups). Omit to act on the active layer.
 
 ```javascript
 // Example: Move to bottom
 photoshop_move_layer_to_bottom()
+
+// Example: target a named layer
+photoshop_move_layer_to_bottom({ layer_name: "透视辅助线" })
 ```
 
 #### `photoshop_move_layer_up`
-Move the active layer up one position.
+Move a layer up one position inside its own group.
+
+**Parameters:**
+- `layer_name` (string, optional): Target layer by name (searches nested groups). Omit to act on the active layer.
 
 ```javascript
 // Example: Move up
 photoshop_move_layer_up()
+
+// Example: target a named layer
+photoshop_move_layer_up({ layer_name: "透视辅助线" })
 ```
 
 #### `photoshop_move_layer_down`
-Move the active layer down one position.
+Move a layer down one position inside its own group.
+
+**Parameters:**
+- `layer_name` (string, optional): Target layer by name (searches nested groups). Omit to act on the active layer.
 
 ```javascript
 // Example: Move down
 photoshop_move_layer_down()
+
+// Example: target a named layer
+photoshop_move_layer_down({ layer_name: "透视辅助线" })
 ```
 
 ### Layer Transformations
 
 #### `photoshop_fit_layer_to_document`
-Scale the active layer to fit the document canvas while maintaining aspect ratio.
+Scale a layer to fit the document canvas while maintaining aspect ratio.
 
 **Parameters:**
 - `fillDocument` (boolean, optional): If true, fills entire canvas (may crop). If false, fits within canvas (may have margins). Default: false
+- `layer_name` (string, optional): Target layer by name (searches nested groups). Omit to act on the active layer.
 
 ```javascript
 // Example: Fit layer within canvas
@@ -411,11 +444,12 @@ photoshop_fit_layer_to_document({ fillDocument: true })
 ```
 
 #### `photoshop_scale_layer`
-Scale the active layer by a percentage.
+Scale a layer by a percentage.
 
 **Parameters:**
 - `scalePercent` (number, required): Scale percentage (e.g., 50 for 50%, 200 for 200%)
 - `centerAnchor` (boolean, optional): Scale from center (true) or top-left (false). Default: true
+- `layer_name` (string, optional): Target layer by name (searches nested groups). Omit to act on the active layer.
 
 ```javascript
 // Example: Scale to 150%
@@ -426,11 +460,12 @@ photoshop_scale_layer({
 ```
 
 #### `photoshop_move_layer`
-Move the active layer by specified offset.
+Move a layer by a pixel offset.
 
 **Parameters:**
 - `deltaX` (number, required): Horizontal offset in pixels
 - `deltaY` (number, required): Vertical offset in pixels
+- `layer_name` (string, optional): Target layer by name (searches nested groups). Omit to act on the active layer.
 
 ```javascript
 // Example: Move layer 100px right and 50px down
@@ -441,10 +476,11 @@ photoshop_move_layer({
 ```
 
 #### `photoshop_rotate_layer`
-Rotate the active layer.
+Rotate a layer around its center.
 
 **Parameters:**
 - `degrees` (number, required): Rotation angle in degrees (positive = clockwise)
+- `layer_name` (string, optional): Target layer by name (searches nested groups). Omit to act on the active layer.
 
 ```javascript
 // Example: Rotate 45 degrees clockwise
@@ -1160,6 +1196,7 @@ Apply a layer effect (Action Manager `layerEffects`) to the active layer.
 - `size` (number, optional): Blur/size in px — stroke width for stroke (default 10)
 - `distance` (number, optional): Offset in px, drop shadow only (default 8)
 - `angle` (number, optional): Light angle in degrees (default 120). Drop shadow uses this local angle (`Use Global Light` is off).
+- `layer_name` (string, optional): Target layer by name (searches nested groups). Omit to act on the active layer.
 
 ```javascript
 // Example: soft drop shadow on the active layer

@@ -7,6 +7,7 @@ import {
   parseSnippetResult,
   runSnippet,
 } from './atomic-shared.js';
+import { LAYER_NAME_PROPERTY, layerName } from './layer-target.js';
 
 const LAYER_STYLES = ['drop_shadow', 'outer_glow', 'stroke', 'bevel_emboss'] as const;
 type LayerStyle = (typeof LAYER_STYLES)[number];
@@ -29,12 +30,12 @@ export function createStyleTools(connection: PhotoshopConnection): ToolDefinitio
       tool: {
         name: 'photoshop_apply_layer_style',
         description:
-          'Apply a layer style (drop shadow, outer glow, stroke, bevel & emboss) to the active layer via Action Manager layer effects.\n\n' +
+          'Apply a layer style (drop shadow, outer glow, stroke, bevel & emboss) to a layer via Action Manager layer effects. Pass layer_name to target a layer directly, otherwise the active layer is used.\n\n' +
           'Users often say: add shadow, glow effect, outline this layer, stroke, bevel, 3D button look, katmana gölge ver.\n\n' +
-          'Use when: quick presentational effects on the active layer (cards, buttons, mockups, text pop).\n' +
+          'Use when: quick presentational effects on one layer (cards, buttons, mockups, text pop).\n' +
           'Do NOT use when: you need full custom layer-effects control — use photoshop_execute_script with a custom layerEffects descriptor.\n\n' +
           'Returns: JSON { ok, summary, details: { style, layer_name } }.\n' +
-          'Preconditions: active document with an active pixel/text layer. Side effects: sets the chosen effect on the active layer. Drop shadow uses the given `angle` (Use Global Light is off).',
+          'Preconditions: active document with one pixel/text layer. Side effects: sets the chosen effect on that layer (it becomes the active layer). Drop shadow uses the given `angle` (Use Global Light is off).',
         inputSchema: {
           type: 'object',
           properties: {
@@ -44,13 +45,56 @@ export function createStyleTools(connection: PhotoshopConnection): ToolDefinitio
               description: 'Which effect to apply',
               default: 'drop_shadow',
             },
-            red: { type: 'number', description: 'Effect color red (0-255)', minimum: 0, maximum: 255, default: 0 },
-            green: { type: 'number', description: 'Effect color green (0-255)', minimum: 0, maximum: 255, default: 0 },
-            blue: { type: 'number', description: 'Effect color blue (0-255)', minimum: 0, maximum: 255, default: 0 },
-            opacity: { type: 'number', description: 'Effect opacity (0-100)', minimum: 0, maximum: 100, default: 60 },
-            size: { type: 'number', description: 'Blur/size in pixels (stroke width for stroke)', minimum: 0, maximum: 250, default: 10 },
-            distance: { type: 'number', description: 'Offset distance in pixels (drop shadow only)', minimum: 0, maximum: 250, default: 8 },
-            angle: { type: 'number', description: 'Light angle in degrees (drop shadow / bevel)', minimum: -360, maximum: 360, default: 120 },
+            red: {
+              type: 'number',
+              description: 'Effect color red (0-255)',
+              minimum: 0,
+              maximum: 255,
+              default: 0,
+            },
+            green: {
+              type: 'number',
+              description: 'Effect color green (0-255)',
+              minimum: 0,
+              maximum: 255,
+              default: 0,
+            },
+            blue: {
+              type: 'number',
+              description: 'Effect color blue (0-255)',
+              minimum: 0,
+              maximum: 255,
+              default: 0,
+            },
+            opacity: {
+              type: 'number',
+              description: 'Effect opacity (0-100)',
+              minimum: 0,
+              maximum: 100,
+              default: 60,
+            },
+            size: {
+              type: 'number',
+              description: 'Blur/size in pixels (stroke width for stroke)',
+              minimum: 0,
+              maximum: 250,
+              default: 10,
+            },
+            distance: {
+              type: 'number',
+              description: 'Offset distance in pixels (drop shadow only)',
+              minimum: 0,
+              maximum: 250,
+              default: 8,
+            },
+            angle: {
+              type: 'number',
+              description: 'Light angle in degrees (drop shadow / bevel)',
+              minimum: -360,
+              maximum: 360,
+              default: 120,
+            },
+            layer_name: { ...LAYER_NAME_PROPERTY },
           },
         },
       },
@@ -73,6 +117,7 @@ async function applyLayerStyle(
     size: clampNumber(args.size, 0, 250, 10),
     distance: clampNumber(args.distance, 0, 250, 8),
     angle: clampNumber(args.angle, -360, 360, 120),
+    layerName: layerName(args),
   };
 
   try {

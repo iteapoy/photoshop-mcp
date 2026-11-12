@@ -2,7 +2,12 @@ import { ToolDefinition, ToolResult } from '../core/tool-registry.js';
 import { PhotoshopConnection } from '../platform/connection.js';
 import { PhotoshopAPIFactory } from '../api/photoshop-api.js';
 import { ExtendScriptSnippets } from '../api/extendscript.js';
-import { atomicFailure, atomicFailureFromError, atomicSuccess, parseSnippetResult } from './atomic-shared.js';
+import {
+  atomicFailure,
+  atomicFailureFromError,
+  atomicSuccess,
+  parseSnippetResult,
+} from './atomic-shared.js';
 import { emitTextStyleLiteral, hasTextStyle, parseTextStyleArgs } from './text-style-options.js';
 
 export function createLayerTools(connection: PhotoshopConnection): ToolDefinition[] {
@@ -107,7 +112,8 @@ export function createLayerTools(connection: PhotoshopConnection): ToolDefinitio
             kind: {
               type: 'string',
               enum: ['point', 'paragraph'],
-              description: 'point = single-line; paragraph = wrapped text box (default point unless box_width/height set)',
+              description:
+                'point = single-line; paragraph = wrapped text box (default point unless box_width/height set)',
             },
             box_width: {
               type: 'number',
@@ -133,8 +139,18 @@ export function createLayerTools(connection: PhotoshopConnection): ToolDefinitio
               description: 'Paragraph/point justification',
             },
             red: { type: 'number', description: 'Text color red 0–255', minimum: 0, maximum: 255 },
-            green: { type: 'number', description: 'Text color green 0–255', minimum: 0, maximum: 255 },
-            blue: { type: 'number', description: 'Text color blue 0–255', minimum: 0, maximum: 255 },
+            green: {
+              type: 'number',
+              description: 'Text color green 0–255',
+              minimum: 0,
+              maximum: 255,
+            },
+            blue: {
+              type: 'number',
+              description: 'Text color blue 0–255',
+              minimum: 0,
+              maximum: 255,
+            },
           },
           required: ['text'],
         },
@@ -196,8 +212,18 @@ export function createLayerTools(connection: PhotoshopConnection): ToolDefinitio
           type: 'object',
           properties: {
             fromRed: { type: 'number', description: 'Start red (0-255)', minimum: 0, maximum: 255 },
-            fromGreen: { type: 'number', description: 'Start green (0-255)', minimum: 0, maximum: 255 },
-            fromBlue: { type: 'number', description: 'Start blue (0-255)', minimum: 0, maximum: 255 },
+            fromGreen: {
+              type: 'number',
+              description: 'Start green (0-255)',
+              minimum: 0,
+              maximum: 255,
+            },
+            fromBlue: {
+              type: 'number',
+              description: 'Start blue (0-255)',
+              minimum: 0,
+              maximum: 255,
+            },
             toRed: { type: 'number', description: 'End red (0-255)', minimum: 0, maximum: 255 },
             toGreen: { type: 'number', description: 'End green (0-255)', minimum: 0, maximum: 255 },
             toBlue: { type: 'number', description: 'End blue (0-255)', minimum: 0, maximum: 255 },
@@ -219,7 +245,7 @@ export function createLayerTools(connection: PhotoshopConnection): ToolDefinitio
           'List all layers in the active document with kind, visibility, and opacity.\n\n' +
           'Use when: choosing a layer to edit, debugging structure, or after organize_layers.\n' +
           'Do NOT use when: only session summary is needed — use photoshop_get_state (lighter).\n\n' +
-          'Returns: layerCount, layers array (LayerSets include is_artboard), context.\n' +
+          'Returns: plain JSON (no text prefix) with layerCount, layers array (LayerSets include is_artboard), context.\n' +
           'Preconditions: active document. Side effects: none.',
         inputSchema: {
           type: 'object',
@@ -232,9 +258,9 @@ export function createLayerTools(connection: PhotoshopConnection): ToolDefinitio
       tool: {
         name: 'photoshop_select_layer_by_name',
         description:
-          'Select the active layer by exact name, including layers inside groups.\n\n' +
-          'Use when: a transform or property tool must target a named layer (photoshop_scale_layer, etc.).\n' +
-          'Do NOT use when: the layer is already active — check photoshop_get_state first.\n\n' +
+          'Select a layer by exact name, including layers inside groups.\n\n' +
+          'Use when: the follow-up step has no layer_name argument (masks, some filters) or the user wants this layer active in the UI.\n' +
+          'Do NOT use when: the next tool accepts layer_name (transforms, ordering, opacity, visibility, duplicate, rasterize, layer styles) — pass the name there instead of selecting first.\n\n' +
           'Returns: selected, layerName, kind, bounds (best-effort), context.\n' +
           'First depth-first name match wins when duplicate names exist in different groups.\n' +
           'Preconditions: active document. Side effects: changes active layer.',
@@ -336,8 +362,10 @@ async function createTextLayer(
   }
   const x = typeof args.x === 'number' && Number.isFinite(args.x) ? args.x : 100;
   const y = typeof args.y === 'number' && Number.isFinite(args.y) ? args.y : 100;
-  const fontSize = typeof args.fontSize === 'number' && Number.isFinite(args.fontSize) ? args.fontSize : 24;
-  const fontName = typeof args.fontName === 'string' && args.fontName.trim() ? args.fontName.trim() : undefined;
+  const fontSize =
+    typeof args.fontSize === 'number' && Number.isFinite(args.fontSize) ? args.fontSize : 24;
+  const fontName =
+    typeof args.fontName === 'string' && args.fontName.trim() ? args.fontName.trim() : undefined;
   const parsed = parseTextStyleArgs(args, { requireSome: false });
   if (parsed.error) return atomicFailure(parsed.error);
 
@@ -349,7 +377,12 @@ async function createTextLayer(
     const raw = await api.executeScript(
       ExtendScriptSnippets.createTextLayer(text, x, y, fontSize, fontName, styleLiteral)
     );
-    const details = parseSnippetResult(raw) ?? { text, position: { x, y }, fontSize, font: fontName };
+    const details = parseSnippetResult(raw) ?? {
+      text,
+      position: { x, y },
+      fontSize,
+      font: fontName,
+    };
     return atomicSuccess(
       `Text layer created: "${text}" at (${x}, ${y})${fontName ? ` with font ${fontName}` : ''}`,
       details,
@@ -484,7 +517,9 @@ async function getLayers(connection: PhotoshopConnection): Promise<ToolResult> {
       content: [
         {
           type: 'text' as const,
-          text: `Layers:\n${JSON.stringify(result, null, 2)}`,
+          // Pure JSON on purpose: callers (agents, scripts) parse this
+          // directly, so no "Layers:" prefix that has to be stripped first.
+          text: JSON.stringify(result, null, 2),
         },
       ],
     };
