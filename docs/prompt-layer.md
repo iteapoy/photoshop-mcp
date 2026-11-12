@@ -82,7 +82,7 @@ when the standalone UI passes `PHOTOSHOP_EXPORT_CHAT_ID` to the MCP child).
 | Tool | File |
 |------|------|
 | `photoshop_get_state` | [`src/tools/state-tools.ts`](../src/tools/state-tools.ts) |
-| `photoshop_get_preview` | same. JPEG plus document size, color mode, and up to 40 top-level layer names. Declares MCP App `ui://photoshop/preview`. |
+| `photoshop_get_preview` | same. JPEG plus document size, color mode, and up to 40 top-level layer names; pass `layer_name` to solo one layer and crop to its content. Declares MCP App `ui://photoshop/preview`. |
 | `photoshop_get_capabilities` | same |
 
 The preview app reads a previous frame from `photoshop://preview/previous/{documentId}` (process memory). That JPEG is not copied into the tool text the model sees. Long-edge buttons call `photoshop_recipe_prepare_for_web`.

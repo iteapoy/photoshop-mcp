@@ -16,6 +16,19 @@ export interface PreviewScriptPayload {
   documentHeight: number;
   colorMode: string;
   layers: string[];
+  /** Set when the preview was rendered for a single soloed layer. */
+  layerName?: string;
+  layerBounds?: PreviewRect;
+  sourceWidth?: number;
+  sourceHeight?: number;
+  cropped?: boolean;
+}
+
+export interface PreviewRect {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
 }
 
 export function parsePreviewScriptPayload(raw: unknown): PreviewScriptPayload | undefined {
@@ -26,7 +39,8 @@ export function parsePreviewScriptPayload(raw: unknown): PreviewScriptPayload | 
     path: record.path,
     width: finiteNumber(record.width),
     height: finiteNumber(record.height),
-    mimeType: typeof record.mimeType === 'string' && record.mimeType ? record.mimeType : 'image/jpeg',
+    mimeType:
+      typeof record.mimeType === 'string' && record.mimeType ? record.mimeType : 'image/jpeg',
     documentId:
       typeof record.documentId === 'number' || typeof record.documentId === 'string'
         ? record.documentId
@@ -36,6 +50,25 @@ export function parsePreviewScriptPayload(raw: unknown): PreviewScriptPayload | 
     documentHeight: finiteNumber(record.documentHeight) || finiteNumber(record.height),
     colorMode: typeof record.colorMode === 'string' ? record.colorMode : '',
     layers: layerNames(record.layers),
+    layerName:
+      typeof record.layerName === 'string' && record.layerName.trim()
+        ? record.layerName.trim()
+        : undefined,
+    layerBounds: previewRect(record.layerBounds),
+    sourceWidth: finiteNumber(record.sourceWidth) || undefined,
+    sourceHeight: finiteNumber(record.sourceHeight) || undefined,
+    cropped: record.cropped === true,
+  };
+}
+
+function previewRect(value: unknown): PreviewRect | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const record = value as Record<string, unknown>;
+  return {
+    left: finiteNumber(record.left),
+    top: finiteNumber(record.top),
+    width: finiteNumber(record.width),
+    height: finiteNumber(record.height),
   };
 }
 
@@ -83,6 +116,15 @@ export function buildPreviewToolResult(
     height: payload.height,
     bytes,
     previousAvailable: Boolean(previousUri),
+    ...(payload.layerName
+      ? {
+          layerName: payload.layerName,
+          layerBounds: payload.layerBounds,
+          sourceWidth: payload.sourceWidth,
+          sourceHeight: payload.sourceHeight,
+          cropped: payload.cropped === true,
+        }
+      : {}),
   };
 
   const structuredContent: Record<string, unknown> = { ...text };

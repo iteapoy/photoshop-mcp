@@ -275,21 +275,24 @@ Available blend modes: NORMAL, DISSOLVE, DARKEN, MULTIPLY, COLORBURN, LINEARBURN
 `COLOR` is the UI name for Color blend (colorize). The server maps it to ExtendScript `BlendMode.COLORBLEND`. `LUMINOSITY` is already the DOM name. `DARKERCOLOR` / `LIGHTERCOLOR` use Action Manager when the classic `BlendMode` enum does not expose them.
 
 #### `photoshop_set_layer_visibility`
-Show or hide the active layer.
+Show or hide a layer.
 
 **Parameters:**
 - `visible` (boolean, required): Visibility state
+- `layer_name` (string, optional): Target layer by name (searches nested groups). Omit to use the active layer
 
 ```javascript
-// Example: Hide layer
-photoshop_set_layer_visibility({ visible: false })
+// Example: Hide two reference layers without selecting them first
+photoshop_set_layer_visibility({ visible: false, layer_name: "图层 2" })
+photoshop_set_layer_visibility({ visible: false, layer_name: "图层 3" })
 ```
 
 #### `photoshop_set_layer_locked`
-Lock or unlock the active layer.
+Lock or unlock a layer (`layer_name` optional, otherwise the active layer).
 
 **Parameters:**
 - `locked` (boolean, required): Lock state
+- `layer_name` (string, optional): Target layer by name
 
 ```javascript
 // Example: Lock layer
@@ -1068,21 +1071,38 @@ photoshop_crop_document({
 ```
 
 #### `photoshop_place_image`
-Place an image file as a layer in the active document.
+Place an image file as a layer in the active document, at an exact pixel position and size.
 
 **Parameters:**
 - `filePath` (string, required): Full path to the image file
-- `x` (number, optional): Absolute canvas X of the placed layer **top-left**, in pixels (default: 0 = document left edge)
-- `y` (number, optional): Absolute canvas Y of the placed layer **top-left**, in pixels (default: 0 = document top edge)
+- `x` (number, optional): Absolute canvas X of the **anchor point**, in pixels (default: 0)
+- `y` (number, optional): Absolute canvas Y of the **anchor point**, in pixels (default: 0)
+- `anchor` (string, optional): Which point of the image `x`/`y` refers to — `top_left` (default), `top_center`, `top_right`, `center_left`, `center`, `center_right`, `bottom_left`, `bottom_center`, `bottom_right`
+- `scale` (number, optional): Percentage of the image's natural pixel size (default: 100 — one image pixel per canvas pixel). Ignored when `fit_to_canvas` is true
+- `fit_to_canvas` (boolean, optional): Scale to fit inside the canvas, keeping aspect ratio
+- `rasterize` (boolean, optional): Rasterize the placed smart object immediately (default: false)
 
-`x`/`y` are **not** an offset from Photoshop's default centered Place. After Place, the server translates the layer so `layer.bounds` top-left matches `(x, y)`.
+`x`/`y` are **not** an offset from Photoshop's default centered Place. Photoshop's Place fits the image into the canvas and reports
+`layer.bounds`, which may be the **non-transparent** content box rather than the image rectangle — anchoring on that box is what
+shifts PNGs with transparent margins off-canvas. The server measures the source file, detects which bounds it got, and translates
+by the real image rectangle, so the result is exact either way. The response reports `boundsMode` (`untrimmed` or
+`trim_compensated`), `trimInsets`, `imageSize`, `scalePercent`, `layerBounds` and `pixelBounds`.
 
 ```javascript
-// Example: Place so the layer's top-left sits at (100, 200)
+// Example: place a 2000×2276 overlay at 1:1, top-left at (100, 200)
 photoshop_place_image({
-  filePath: "/Users/username/Pictures/photo.jpg",
+  filePath: "/Users/username/Pictures/overlay.png",
   x: 100,
   y: 200
+})
+
+// Example: center a 50%-size logo on the canvas
+photoshop_place_image({
+  filePath: "/Users/username/Pictures/logo.png",
+  x: 1000,
+  y: 1138,
+  anchor: "center",
+  scale: 50
 })
 ```
 

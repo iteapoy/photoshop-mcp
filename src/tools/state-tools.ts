@@ -10,6 +10,29 @@ import { envelopeToToolResult, classifyError } from '../errors/envelope.js';
 import { parseExtendScriptPayload } from '../utils/extendscript-result.js';
 
 const PREVIEW_MAX_BYTES = 4 * 1024 * 1024;
+const LEGACY_QUALITY_MAX = 12;
+const DEFAULT_MAX_DIMENSION = 1024;
+// 64% maps to JPEG quality 8 — the previous default, so previews keep their size.
+const DEFAULT_PERCENT = 64;
+
+/**
+ * Preview quality is a 0–100 percentage, but the tool shipped for a long time
+ * with a 1–12 JPEG scale (8 = default). Callers still pass both, so treat
+ * anything up to 12 as the legacy scale and map it onto the percentage.
+ */
+export function resolveJpegQuality(raw: unknown): number {
+  const value = typeof raw === 'number' && Number.isFinite(raw) ? raw : NaN;
+  // Legacy callers passed the JPEG kval directly: keep 1–12 exact.
+  if (Number.isInteger(value) && value >= 1 && value <= LEGACY_QUALITY_MAX) return value;
+  const percent = Number.isFinite(value) ? Math.min(100, Math.max(0, value)) : DEFAULT_PERCENT;
+  // Photoshop's JPEGSaveOptions.quality is 0–12.
+  return Math.min(12, Math.max(1, Math.round(1 + (percent / 100) * 11)));
+}
+
+function resolveMaxDimension(raw: unknown): number {
+  const value = typeof raw === 'number' && Number.isFinite(raw) ? raw : DEFAULT_MAX_DIMENSION;
+  return Math.min(4096, Math.max(64, Math.round(value)));
+}
 
 async function runScript(connection: PhotoshopConnection, script: string): Promise<unknown> {
   const apiFactory = new PhotoshopAPIFactory(connection);
@@ -37,9 +60,13 @@ export function createStateTools(connection: PhotoshopConnection): ToolDefinitio
         name: 'photoshop_get_preview',
         description:
           'Export the active document as a base64 JPEG preview for visual verification.\n\n' +
+          'Pass layer_name to preview ONE layer: the copy is soloed to that layer and trimmed to its content, ' +
+          'which is the cheapest way to check what a layer actually contains.\n\n' +
           'Use when: after visual edits to confirm result before reporting success to the user.\n' +
-          'Do NOT use when: you only need numeric state — use photoshop_get_state (much cheaper).\n\n' +
-          'Returns: MCP image content block (JPEG) plus metadata text (document size, color mode, up to 40 top-level layer names). Hosts that support MCP Apps also render ui://photoshop/preview.\n' +
+          'Do NOT use when: you only need numeric state — use photoshop_get_state (much cheaper).\n' +
+          'Do NOT use when: you need the layer as a file on disk — use photoshop_export_as instead.\n\n' +
+          'Returns: MCP image content block (JPEG) plus metadata text (document size, color mode, up to 40 top-level layer names; ' +
+          'with layer_name also layerBounds, sourceWidth/Height and cropped=true). Hosts that support MCP Apps also render ui://photoshop/preview.\n' +
           'Preconditions: active document required. Side effects: creates and deletes a temp file; does not modify the document.',
         _meta: {
           ui: { resourceUri: PREVIEW_APP_URI },
@@ -54,10 +81,18 @@ export function createStateTools(connection: PhotoshopConnection): ToolDefinitio
             },
             quality: {
               type: 'number',
-              description: 'JPEG quality 1–12 (default 8)',
-              minimum: 1,
-              maximum: 12,
-              default: 8,
+              description:
+                'JPEG quality 0–100, default 64. Values 1–12 are accepted for backward compatibility and ' +
+                'read as the legacy 1–12 JPEG scale (8 = 64).',
+              minimum: 0,
+              maximum: 100,
+              default: 64,
+            },
+            layer_name: {
+              type: 'string',
+              description:
+                "Preview only this layer (searched recursively). The result is cropped to the layer's " +
+                'content bounds. Omit for the full document.',
             },
           },
         },
@@ -98,15 +133,19 @@ async function getPreview(
   connection: PhotoshopConnection,
   args: Record<string, unknown>
 ): Promise<ToolResult> {
-  const maxDimension = (args.max_dimension_px as number) || 1024;
-  const quality = (args.quality as number) || 8;
+  const maxDimension = resolveMaxDimension(args.max_dimension_px);
+  const quality = resolveJpegQuality(args.quality);
+  const layerName = typeof args.layer_name === 'string' ? args.layer_name.trim() : '';
 
   let tempPath: string | undefined;
 
   try {
     const payload = parsePreviewScriptPayload(
       parseExtendScriptPayload(
-        await runScript(connection, ExtendScriptSnippets.exportPreview(maxDimension, quality))
+        await runScript(
+          connection,
+          ExtendScriptSnippets.exportPreview(maxDimension, quality, layerName)
+        )
       )
     );
     if (!payload) {
@@ -119,7 +158,10 @@ async function getPreview(
     if (buffer.byteLength > PREVIEW_MAX_BYTES) {
       return envelopeToToolResult(
         classifyError(
-          `Preview exceeds ${PREVIEW_MAX_BYTES} byte limit (${buffer.byteLength} bytes). Lower max_dimension_px or quality.`
+          `Preview exceeds ${PREVIEW_MAX_BYTES} byte limit (${buffer.byteLength} bytes). ` +
+            `Lower max_dimension_px (current ${maxDimension}) or quality (0–100, current ${Math.round(
+              ((quality - 1) / 11) * 100
+            )}).`
         )
       );
     }

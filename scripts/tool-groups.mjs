@@ -17,9 +17,18 @@
  * call comes back with the exact expected signature instead of an opaque
  * upstream error.
  *
+ * One calling convention, two entry points
+ * ----------------------------------------
+ *   group tool      { action: "get_layers", params: { document_id: 3 } }
+ *   photoshop_call  { tool: "photoshop_get_layers", params: { document_id: 3 } }
+ *
+ * Both name the payload `params`. `arguments` / `args` are still accepted as
+ * legacy aliases (and flat siblings of the action key are merged in), but they
+ * are never advertised: one shape is easier to remember than two. Nested
+ * wrappers of any depth are spliced by `unwrapNestedArgs`.
+ *
  * Config: ~/.photoshop-mcp/tool-groups.json
  *   {
- *     "enabled": true,                    // false = expose the flat 120 again
  *     "rawTool": true,                    // expose photoshop_call escape hatch
  *     "overrides": { "photoshop_foo": "layer" }
  *   }
@@ -92,6 +101,19 @@ const SYSTEM_TOOLS = new Set([
   'execute_script',
 ]);
 
+/**
+ * Names the heuristics below would file under the wrong group. Sorted-out by
+ * hand because a name is not a taxonomy: `select_layer_by_name` starts with
+ * "select" but is a layer lookup, and `rasterize_layer` belongs to the layer
+ * domain, not to export.
+ */
+const EXACT_GROUPS = {
+  select_layer_by_name: 'layer',
+  rasterize_layer: 'layer',
+  apply_layer_style: 'layer',
+  fit_layer_to_document: 'layer',
+};
+
 const DOCUMENT_TOOLS = new Set([
   'get_state',
   'get_preview',
@@ -125,7 +147,7 @@ export function loadGroupConfig() {
     stamp = 0;
   }
   if (cfgCache && stamp === cfgStamp) return cfgCache;
-  const defaults = { enabled: true, rawTool: true, overrides: {} };
+  const defaults = { rawTool: true, overrides: {} };
   try {
     const raw = JSON.parse(readFileSync(GROUPS_FILE, 'utf8'));
     cfgCache = { ...defaults, ...raw, overrides: { ...(raw.overrides ?? {}) } };
@@ -144,6 +166,7 @@ export function groupOf(toolName, config = loadGroupConfig()) {
   if (override) return override;
 
   const s = actionOf(toolName);
+  if (EXACT_GROUPS[s]) return EXACT_GROUPS[s];
   if (s.startsWith('recipe_')) return 'recipe';
   if (SYSTEM_TOOLS.has(s)) return 'system';
   if (DOCUMENT_TOOLS.has(s)) return 'document';
@@ -315,12 +338,17 @@ export function buildGroupedTools(tools, config = loadGroupConfig()) {
       name: 'photoshop_call',
       description:
         'Escape hatch: call one raw upstream tool by its exact name with its original schema. ' +
+        'Same shape as a group tool — { tool, params } — only the key names differ. ' +
         'Only use when the grouped tools cannot express the call; check photoshop_schema first.',
       inputSchema: {
         type: 'object',
         properties: {
           tool: { type: 'string', description: 'Exact tool name, e.g. photoshop_get_state' },
-          arguments: { type: 'object', description: 'Arguments object for that tool', additionalProperties: true },
+          params: {
+            type: 'object',
+            description: 'Arguments for that tool (same field names as its schema).',
+            additionalProperties: true,
+          },
         },
         required: ['tool'],
         additionalProperties: false,
@@ -376,6 +404,43 @@ function coerce(value, prop) {
   return value;
 }
 
+/** Keys that only ever act as a payload wrapper, never as a real parameter. */
+const WRAPPER_KEYS = ['params', 'arguments', 'args'];
+
+function isPlainObject(value) {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+/**
+ * Splice payload wrappers until the arguments sit at the top level.
+ *
+ * Models wrap without a consistent depth: `{ params: { params: { document_id } } }`
+ * is something a real session produces, and the `photoshop_call` escape hatch
+ * adds `arguments` on top of it. Rather than teaching the caller the depth, we
+ * peel every wrapper layer here — bounded by a guard and a seen-set so a
+ * self-referencing object cannot spin forever.
+ *
+ * A key is only treated as a wrapper when the target schema has no parameter of
+ * that name, so tools that genuinely take `params` keep their payload intact.
+ */
+export function unwrapNestedArgs(input, props) {
+  let args = { ...(input ?? {}) };
+  const seen = new Set([args]);
+  for (let guard = 0; guard < 8; guard++) {
+    const key = WRAPPER_KEYS.find(
+      (k) => !(k in props) && isPlainObject(args[k]) && !seen.has(args[k])
+    );
+    if (!key) break;
+    const nested = args[key];
+    seen.add(nested);
+    const rest = { ...args };
+    delete rest[key];
+    // The wrapper is the more specific truth: it wins over leftover siblings.
+    args = { ...rest, ...nested };
+  }
+  return args;
+}
+
 /**
  * Validate + normalize arguments for a real tool.
  *
@@ -386,7 +451,7 @@ export function prepareArgs(tool, rawArgs) {
   const sch = schemaOf(tool);
   const props = sch.properties ?? {};
   const required = new Set(sch.required ?? []);
-  const args = { ...(rawArgs ?? {}) };
+  const args = unwrapNestedArgs({ ...(rawArgs ?? {}) }, props);
   const errors = [];
 
   if (required.has('document_id') && args.document_id === undefined) {
@@ -408,6 +473,15 @@ export function prepareArgs(tool, rawArgs) {
   if (unknown.length) {
     const allowed = Object.keys(props).length ? Object.keys(props).join(', ') : '(none)';
     errors.push(`unknown params: ${unknown.join(', ')} — allowed: ${allowed}`);
+    // Wrappers of any depth are already spliced above, so a surviving one is
+    // either not an object (e.g. params: "document_id=3") or self-referencing.
+    const wrappers = unknown.filter((k) => WRAPPER_KEYS.includes(k));
+    if (wrappers.length) {
+      errors.push(
+        `hint: "${wrappers.join('", "')}" only wraps the real parameters — ` +
+          'pass them as a JSON object inside it, e.g. params: { document_id: 3 }'
+      );
+    }
   }
 
   const badType = [];
@@ -443,20 +517,26 @@ export function prepareArgs(tool, rawArgs) {
 }
 
 /**
- * Pull `{ action, params }` out of whatever shape the model produced.
- * Accepts params/args/arguments nested, or flat siblings of `action`.
+ * Pull `{ <actionKey>, params }` out of whatever shape the model produced.
+ *
+ * One extractor for both entry points — `action` for a group tool, `tool` for
+ * photoshop_call — so the two can never drift apart again. Accepted, in order
+ * of preference: `params`, `arguments`, `args`, plus flat siblings of the
+ * action key (older prompts spread the payload instead of nesting it).
+ * Deeper wrappers are left for `prepareArgs`, which splices them by schema.
  */
-export function extractActionAndParams(rawArgs) {
-  const args = { ...(rawArgs ?? {}) };
-  const action = typeof args.action === 'string' ? args.action.trim() : '';
-  delete args.action;
-  let params = args.params ?? args.args ?? args.arguments;
-  delete args.params;
-  delete args.args;
-  delete args.arguments;
-  if (!params || typeof params !== 'object' || Array.isArray(params)) params = {};
-  const merged = { ...args, ...params };
-  return { action, params: merged };
+export function extractCall(rawArgs, actionKey = 'action') {
+  const rest = { ...(rawArgs ?? {}) };
+  const rawAction = rest[actionKey];
+  delete rest[actionKey];
+  const action = typeof rawAction === 'string' ? rawAction.trim() : '';
+
+  let params = {};
+  for (const key of ['args', 'arguments', 'params']) {
+    if (isPlainObject(rest[key])) params = { ...params, ...rest[key] };
+    delete rest[key];
+  }
+  return { action, params: { ...rest, ...params } };
 }
 
 export function findToolByName(tools, name) {

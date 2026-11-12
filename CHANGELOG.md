@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- HTTP bridge: one calling convention instead of two. `photoshop_call` now takes `{ tool, params }` — the same key as a group tool — and a single `extractCall()` backs both entry points, so `params`/`arguments`/`args` and flat siblings all resolve the same way. The flat 120-tool surface is gone (no `--flat`, no `"enabled": false`): the grouped surface is the only shape the bridge exposes, and an unknown tool name now returns the group list instead of silently forwarding.
+
+### Fixed
+
+- `photoshop_get_preview` with `layer_name` actually works. The preview copy was made with `duplicate(name, true)`, which merges every layer, so the solo step could never find the layer and the tool failed with `layer_not_found`. The copy is no longer merged, and it is closed in a `finally` — a failed solo used to leave a stray `__mcp_preview__` document open in the workspace.
+- Nested `params` wrappers are spliced at any depth, not just three levels, with a seen-set so a self-referencing payload cannot spin. The old "nested too deep" hint is gone; a wrapper that survives is reported as a wrapper (not a field) rather than as an unknown parameter.
+- `photoshop_place_image` anchors on the real image rectangle. Photoshop reports `layer.bounds` as the non-transparent content box for PNGs with transparent margins, which used to shift the layer by the trim size. The tool now measures the source, detects which bounds it received (`boundsMode`), and compensates by the trim insets. Adds `anchor`, `scale`, `fit_to_canvas` and `rasterize`.
+- `photoshop_set_layer_visibility`, `set_layer_opacity`, `set_layer_blend_mode`, `set_layer_locked`, `rename_layer` and `delete_layer` accept `layer_name`, so a layer can be edited without selecting it first (and without editing whatever happened to be active).
+- `photoshop_get_preview` accepts `layer_name`: the preview is soloed to that layer and cropped to its content, with `layerBounds` in the response. Previously the only way to inspect one layer was to flatten copies by hand in `execute_script`.
+
 ## [1.7.37] - 2026-10-15
 
 [v1.7.36...v1.7.37](https://github.com/alisaitteke/photoshop-mcp/compare/v1.7.36...v1.7.37)

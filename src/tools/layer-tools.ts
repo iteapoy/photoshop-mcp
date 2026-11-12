@@ -32,19 +32,25 @@ export function createLayerTools(connection: PhotoshopConnection): ToolDefinitio
       tool: {
         name: 'photoshop_delete_layer',
         description:
-          'Delete the active layer, including its pixels, mask, and effects.\n\n' +
+          'Delete a layer, including its pixels, mask, and effects. Pass layer_name to target it directly; omit to delete the active layer.\n\n' +
           'Use when: the user wants that layer removed from the stack.\n' +
           'Do NOT use when: it should only be hidden — use photoshop_set_layer_visibility.\n' +
           'Do NOT use when: only the mask should go — use photoshop_delete_layer_mask.\n' +
           'Do NOT use when: the whole stack should collapse — use photoshop_flatten_image.\n\n' +
-          'Returns: confirmation that the layer was deleted.\n' +
-          'Preconditions: active document and a deletable active layer. Side effects: destroys the layer. Reversible with photoshop_undo while history holds it.',
+          'Returns: the deleted layer name.\n' +
+          'Preconditions: active document; layer_name or a deletable active layer. Side effects: destroys the layer. Reversible with photoshop_undo while history holds it.',
         inputSchema: {
           type: 'object',
-          properties: {},
+          properties: {
+            layer_name: {
+              type: 'string',
+              description:
+                'Target layer by name (searches nested groups). Omit or leave empty to delete the active layer.',
+            },
+          },
         },
       },
-      handler: async () => deleteLayer(connection),
+      handler: async (args) => deleteLayer(connection, args),
     },
     {
       tool: {
@@ -282,19 +288,24 @@ async function createLayer(
   }
 }
 
-async function deleteLayer(connection: PhotoshopConnection): Promise<ToolResult> {
+async function deleteLayer(
+  connection: PhotoshopConnection,
+  args: Record<string, unknown> = {}
+): Promise<ToolResult> {
+  const layerName = typeof args.layer_name === 'string' ? args.layer_name.trim() : '';
+
   try {
     const apiFactory = new PhotoshopAPIFactory(connection);
     const api = await apiFactory.createAPI();
 
-    const script = ExtendScriptSnippets.deleteLayer();
-    await api.executeScript(script);
+    const script = ExtendScriptSnippets.deleteLayer(layerName);
+    const result = await api.executeScript(script);
 
     return {
       content: [
         {
           type: 'text' as const,
-          text: 'Layer deleted successfully',
+          text: `Layer deleted successfully${layerName ? `: ${layerName}` : ''}\nResult: ${JSON.stringify(result)}`,
         },
       ],
     };

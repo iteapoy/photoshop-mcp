@@ -14,6 +14,98 @@ function sTID(s) { return app.stringIDToTypeID(s); }
 `;
 
 /**
+ * Layer targeting helpers.
+ *
+ * Layer-property snippets used to act on `doc.activeLayer` only, so callers had
+ * to select a layer first (and silently edited the wrong layer when they
+ * forgot). `__mcp_resolveLayer` addresses a layer by name without touching the
+ * active layer, which removes that extra round trip.
+ */
+const layerTargetHelpers = `
+function __mcp_findLayer(container, name) {
+  if (!container || !name) return null;
+  try {
+    var layers = container.layers;
+    for (var i = 0; i < layers.length; i++) {
+      if (String(layers[i].name) === String(name)) return layers[i];
+    }
+  } catch (eLayers) {}
+  try {
+    var sets = container.layerSets;
+    for (var j = 0; j < sets.length; j++) {
+      var nested = __mcp_findLayer(sets[j], name);
+      if (nested) return nested;
+    }
+  } catch (eSets) {}
+  return null;
+}
+
+function __mcp_findPath(container, name, chain) {
+  if (!container) return null;
+  try {
+    var layers = container.layers;
+    for (var i = 0; i < layers.length; i++) {
+      if (String(layers[i].name) === String(name)) {
+        chain.push(layers[i]);
+        return layers[i];
+      }
+    }
+  } catch (eLayers) {}
+  try {
+    var sets = container.layerSets;
+    for (var j = 0; j < sets.length; j++) {
+      chain.push(sets[j]);
+      var nested = __mcp_findPath(sets[j], name, chain);
+      if (nested) return nested;
+      chain.pop();
+    }
+  } catch (eSets) {}
+  return null;
+}
+
+function __mcp_hideAll(container) {
+  if (!container) return;
+  try {
+    for (var i = 0; i < container.layers.length; i++) container.layers[i].visible = false;
+  } catch (eL) {}
+  try {
+    for (var j = 0; j < container.layerSets.length; j++) {
+      container.layerSets[j].visible = false;
+      __mcp_hideAll(container.layerSets[j]);
+    }
+  } catch (eS) {}
+}
+
+function __mcp_resolveLayer(doc, name, index) {
+  if (name) {
+    var found = __mcp_findLayer(doc, name);
+    if (!found) throw new Error('layer_not_found: no layer named "' + name + '"');
+    return found;
+  }
+  if (typeof index === 'number' && index > 0) {
+    if (index > doc.layers.length) {
+      throw new Error('layer_not_found: index ' + index + ' is outside 1-' + doc.layers.length);
+    }
+    return doc.layers[index - 1];
+  }
+  if (!doc.activeLayer) throw new Error('No active layer');
+  return doc.activeLayer;
+}
+
+/** Hide every layer except the named one (and its parent groups). Returns the layer. */
+function __mcp_soloLayer(doc, name) {
+  var chain = [];
+  var found = __mcp_findPath(doc, name, chain);
+  if (!found) throw new Error('layer_not_found: no layer named "' + name + '"');
+  __mcp_hideAll(doc);
+  for (var i = 0; i < chain.length; i++) {
+    try { chain[i].visible = true; } catch (eVis) {}
+  }
+  return found;
+}
+`;
+
+/**
  * Artboard helpers — ExtendScript DOM has no Artboard class; they are LayerSets
  * with Action Manager keys artboardEnabled + artboardRect.
  * @see https://developer.adobe.com/photoshop/uxp/2022/ps-reference/classes/document (document.artboards, 22.5+)
@@ -1016,10 +1108,7 @@ function __mcp_createClippingMaskAM() {
 export type CurvesPreset = 'auto_tone' | 'neutral';
 
 export type GradientMaskDirection =
-  | 'top_to_bottom'
-  | 'bottom_to_top'
-  | 'left_to_right'
-  | 'right_to_left';
+  'top_to_bottom' | 'bottom_to_top' | 'left_to_right' | 'right_to_left';
 
 /**
  * Common ExtendScript snippets
@@ -1039,7 +1128,12 @@ export const ExtendScriptSnippets = {
   /**
    * Create a new document
    */
-  newDocument: (width: number, height: number, resolution = 72, colorMode = 'NewDocumentMode.RGB') => `
+  newDocument: (
+    width: number,
+    height: number,
+    resolution = 72,
+    colorMode = 'NewDocumentMode.RGB'
+  ) => `
     var doc = app.documents.add(
       UnitValue(${width}, 'px'),
       UnitValue(${height}, 'px'),
@@ -1128,11 +1222,7 @@ export const ExtendScriptSnippets = {
    * Activate an open document by id, tab index, or name.
    * @see https://stackoverflow.com/questions/4537506/how-to-switch-between-open-documents-in-photoshop-using-javascript
    */
-  setActiveDocument: (params: {
-    documentId?: number;
-    documentName?: string;
-    index?: number;
-  }) => {
+  setActiveDocument: (params: { documentId?: number; documentName?: string; index?: number }) => {
     let modeBlock = '';
     if (params.documentId !== undefined) {
       modeBlock = `var __mode = 'id'; var __targetId = ${params.documentId};`;
@@ -1234,13 +1324,17 @@ export const ExtendScriptSnippets = {
     textLayer.textItem.contents = "${jsString(text)}";
     textLayer.textItem.position = [${x}, ${y}];
     textLayer.textItem.size = ${fontSize};
-    ${fontName ? `
+    ${
+      fontName
+        ? `
     var __psFont = resolveFontPostScriptName("${jsString(fontName)}");
     if (!__psFont) {
       throw new Error('font_not_found: ${jsString(fontName)}');
     }
     textLayer.textItem.font = __psFont;
-    ` : ''}
+    `
+        : ''
+    }
     __mcp_applyTextStyle(textLayer.textItem, ${styleLiteral});
     
     var result = {
@@ -1258,60 +1352,242 @@ export const ExtendScriptSnippets = {
 
   /**
    * Place an image file as a layer.
-   * x/y are absolute canvas coordinates for the placed layer's top-left bound
-   * (not an offset from Photoshop's default centered Place).
+   *
+   * `(x, y)` are absolute canvas pixels of the requested anchor point — not an
+   * offset from Photoshop's centered default Place.
+   *
+   * Photoshop's Place returns a layer whose `bounds` is the bounding box of the
+   * NON-TRANSPARENT pixels, not the image rectangle. Anchoring on that box is
+   * what pushed a PNG with transparent margins thousands of pixels off canvas.
+   * This snippet therefore measures the source file first (real size + alpha
+   * trim insets), then solves the image rectangle back out of the placed
+   * bounds, so anchor and scale are exact for JPEG, PNG and PSD alike.
    */
-  placeImage: (filePath: string, x = 0, y = 0) => `
+  placeImage: (
+    filePath: string,
+    x = 0,
+    y = 0,
+    options: {
+      anchorX?: number;
+      anchorY?: number;
+      scalePercent?: number;
+      fitToCanvas?: boolean;
+      rasterize?: boolean;
+    } = {}
+  ) => `
     ${helperFunctions}
     ${getContextInfo}
-    
+
     if (app.documents.length === 0) {
       throw new Error('No active document');
     }
-    
+
     var imageFile = new File("${jsString(filePath)}");
     if (!imageFile.exists) {
       throw new Error('Image file not found: ${jsString(filePath)}');
     }
 
+    var targetDoc = app.activeDocument;
     var targetX = ${x};
     var targetY = ${y};
-    
+    var anchorX = ${options.anchorX ?? 0};
+    var anchorY = ${options.anchorY ?? 0};
+    var scalePercent = ${options.scalePercent ?? 100};
+    var fitToCanvas = ${options.fitToCanvas ? 'true' : 'false'};
+    var rasterizeLayer = ${options.rasterize ? 'true' : 'false'};
+
+    // --- 1. measure the source: real pixel size + transparent trim insets
+    var srcW = 0;
+    var srcH = 0;
+    var trimL = 0;
+    var trimT = 0;
+    var trimR = 0;
+    var trimB = 0;
+    var probe = null;
+    var probeWasAlreadyOpen = false;
+    // Reuse an already-open document instead of reopening (and closing) the
+    // user's tab, which would discard their unsaved state.
+    for (var pd = 0; pd < app.documents.length; pd++) {
+      try {
+        var openPath = app.documents[pd].fullName;
+        if (openPath && openPath.fsName === imageFile.fsName) {
+          probe = app.documents[pd];
+          probeWasAlreadyOpen = true;
+          break;
+        }
+      } catch (eDocPath) {}
+    }
+    if (!probe) {
+      try {
+        probe = app.open(imageFile);
+      } catch (eOpen) {
+        throw new Error('image_not_readable: ' + imageFile.fsName);
+      }
+    }
+    try {
+      srcW = probe.width.as('px');
+      srcH = probe.height.as('px');
+      try {
+        var probeBounds = probe.activeLayer.bounds;
+        trimL = Math.max(0, probeBounds[0].as('px'));
+        trimT = Math.max(0, probeBounds[1].as('px'));
+        trimR = Math.max(0, srcW - probeBounds[2].as('px'));
+        trimB = Math.max(0, srcH - probeBounds[3].as('px'));
+      } catch (eProbeBounds) {}
+    } finally {
+      if (!probeWasAlreadyOpen) {
+        try { probe.close(SaveOptions.DONOTSAVECHANGES); } catch (eClose) {}
+      }
+      app.activeDocument = targetDoc;
+    }
+
+    // --- 2. place
     var desc = new ActionDescriptor();
     desc.putPath(cTID('null'), imageFile);
     desc.putEnumerated(cTID('FTcs'), cTID('QCSt'), cTID('Qcsa'));
-    
+
     var offsetDesc = new ActionDescriptor();
     offsetDesc.putUnitDouble(cTID('Hrzn'), cTID('#Pxl'), 0);
     offsetDesc.putUnitDouble(cTID('Vrtc'), cTID('#Pxl'), 0);
     desc.putObject(cTID('Ofst'), cTID('Ofst'), offsetDesc);
-    
+
     executeAction(cTID('Plc '), desc, DialogModes.NO);
 
-    var layer = app.activeDocument.activeLayer;
-    var placedBounds = layer.bounds;
-    var left = placedBounds[0].as('px');
-    var top = placedBounds[1].as('px');
-    layer.translate(targetX - left, targetY - top);
-    
+    app.activeDocument = targetDoc;
+    var layer = targetDoc.activeLayer;
+
+    // Self-calibration: some Photoshop builds report the placed layer's bounds
+    // as the full image rect, others as the non-transparent content box. Compare
+    // against the size Place would have produced (it only ever scales down to
+    // fit) and only apply trim compensation when the box really is trimmed.
+    var boundsMode = 'untrimmed';
+    try {
+      var fitScale = Math.min(
+        1,
+        Math.min(
+          targetDoc.width.as('px') / srcW,
+          targetDoc.height.as('px') / srcH
+        )
+      );
+      var probeBox = layer.bounds;
+      var boxW = probeBox[2].as('px') - probeBox[0].as('px');
+      var boxH = probeBox[3].as('px') - probeBox[1].as('px');
+      var expectedW = srcW * fitScale;
+      var expectedH = srcH * fitScale;
+      if (Math.abs(boxW - expectedW) > 2 || Math.abs(boxH - expectedH) > 2) {
+        boundsMode = 'trim_compensated';
+      }
+    } catch (eProbeBox) {
+      boundsMode = 'trim_compensated';
+    }
+    if (boundsMode === 'untrimmed') {
+      trimL = 0;
+      trimT = 0;
+      trimR = 0;
+      trimB = 0;
+    }
+
+    // Recover the untrimmed image rect from the reported bounds.
+    function __mcp_imageRect() {
+      var b = layer.bounds;
+      var vL = b[0].as('px');
+      var vT = b[1].as('px');
+      var vR = b[2].as('px');
+      var vB = b[3].as('px');
+      var visibleW = vR - vL;
+      var visibleH = vB - vT;
+      var contentW = srcW - trimL - trimR;
+      var contentH = srcH - trimT - trimB;
+      var imgW = visibleW;
+      var imgH = visibleH;
+      if (contentW > 0.001 && visibleW > 0) imgW = visibleW * (srcW / contentW);
+      if (contentH > 0.001 && visibleH > 0) imgH = visibleH * (srcH / contentH);
+      return {
+        left: vL - (trimL / srcW) * imgW,
+        top: vT - (trimT / srcH) * imgH,
+        width: imgW,
+        height: imgH,
+        visibleWidth: visibleW,
+        visibleHeight: visibleH
+      };
+    }
+
+    var rect = __mcp_imageRect();
+
+    // --- 3. scale (Place fits into the canvas; callers usually want exact pixels)
+    var desiredScale = scalePercent / 100;
+    if (fitToCanvas) {
+      desiredScale = Math.min(
+        targetDoc.width.as('px') / srcW,
+        targetDoc.height.as('px') / srcH
+      );
+    }
+    var scaleApplied = false;
+    if (desiredScale > 0 && rect.width > 0.001) {
+      var ratio = desiredScale / (rect.width / srcW);
+      if (Math.abs(ratio - 1) > 0.0005) {
+        try {
+          layer.resize(ratio * 100, ratio * 100, AnchorPosition.TOPLEFT);
+          rect = __mcp_imageRect();
+          scaleApplied = true;
+        } catch (eResize) {
+          // Linked smart objects can refuse a transform; keep the placed size
+          // and report it instead of failing after the layer already exists.
+        }
+      }
+    }
+
+    if (!(rect.width > 0.001)) {
+      // Nothing measurable (fully transparent source): fall back to centering.
+      rect.width = srcW * desiredScale;
+      rect.height = srcH * desiredScale;
+      rect.left = (targetDoc.width.as('px') - rect.width) / 2;
+      rect.top = (targetDoc.height.as('px') - rect.height) / 2;
+    }
+
+    // --- 4. anchor + translate
+    var targetLeft = targetX - anchorX * rect.width;
+    var targetTop = targetY - anchorY * rect.height;
+    layer.translate(targetLeft - rect.left, targetTop - rect.top);
+
+    if (rasterizeLayer) {
+      try { layer.rasterize(RasterizeType.ENTIRELAYER); } catch (eRaster) {}
+    }
+
+    var placed = __mcp_imageRect();
     var result = {
       placed: true,
       filePath: "${jsString(filePath)}",
-      position: { x: targetX, y: targetY, semantics: 'absolute_top_left' },
+      position: {
+        x: targetX,
+        y: targetY,
+        anchorX: anchorX,
+        anchorY: anchorY,
+        semantics: 'anchor_point_on_image_rect'
+      },
+      imageSize: { width: srcW, height: srcH },
+      scalePercent: Math.round((placed.width / srcW) * 1000) / 10,
+      boundsMode: boundsMode,
+      scaleApplied: scaleApplied,
+      trimInsets: { left: trimL, top: trimT, right: trimR, bottom: trimB },
+      layerName: layer.name,
+      layerBounds: {
+        left: placed.left,
+        top: placed.top,
+        width: placed.width,
+        height: placed.height
+      },
       context: getContextInfo()
     };
     try {
-      result.layerName = layer.name;
-      var bounds = layer.bounds;
-      result.layerBounds = {
-        left: bounds[0].as('px'),
-        top: bounds[1].as('px'),
-        width: bounds[2].as('px') - bounds[0].as('px'),
-        height: bounds[3].as('px') - bounds[1].as('px')
+      var finalBounds = layer.bounds;
+      result.pixelBounds = {
+        left: finalBounds[0].as('px'),
+        top: finalBounds[1].as('px'),
+        width: finalBounds[2].as('px') - finalBounds[0].as('px'),
+        height: finalBounds[3].as('px') - finalBounds[1].as('px')
       };
-    } catch (e) {
-      // Place succeeded; layer metadata is best-effort
-    }
+    } catch (eFinal) {}
     return result;
   `,
 
@@ -1415,16 +1691,19 @@ export const ExtendScriptSnippets = {
   /**
    * Delete active layer
    */
-  deleteLayer: () => `
+  deleteLayer: (layerName = '', layerIndex = 0) => `
+    ${helperFunctions}
+    ${layerTargetHelpers}
+
     if (app.documents.length === 0) {
       throw new Error('No active document');
     }
     var doc = app.activeDocument;
-    if (doc.activeLayer) {
-      doc.activeLayer.remove();
-      return { deleted: true };
-    }
-    throw new Error('No active layer');
+    var layer = __mcp_resolveLayer(doc, "${jsString(layerName)}", ${layerIndex});
+
+    var deletedName = layer.name;
+    layer.remove();
+    return { deleted: true, layerName: deletedName };
   `,
 
   /**
@@ -1869,18 +2148,20 @@ export const ExtendScriptSnippets = {
   /**
    * Set layer opacity
    */
-  setLayerOpacity: (opacity: number) => `
+  setLayerOpacity: (opacity: number, layerName = '', layerIndex = 0) => `
+    ${helperFunctions}
     ${getContextInfo}
-    
+    ${layerTargetHelpers}
+
     if (app.documents.length === 0) {
       throw new Error('No active document');
     }
     var doc = app.activeDocument;
-    var layer = doc.activeLayer;
-    
+    var layer = __mcp_resolveLayer(doc, "${jsString(layerName)}", ${layerIndex});
+
     layer.opacity = ${opacity};
-    
-    var result = { 
+
+    var result = {
       updated: true,
       property: 'opacity',
       value: layer.opacity,
@@ -1895,15 +2176,19 @@ export const ExtendScriptSnippets = {
    * `blendMode` is an ExtendScript BlendMode identifier (e.g. COLORBLEND, not COLOR).
    * Darker Color / Lighter Color fall back to Action Manager when the DOM enum is absent.
    */
-  setLayerBlendMode: (blendMode: string) => `
+  setLayerBlendMode: (blendMode: string, layerName = '', layerIndex = 0) => `
     ${helperFunctions}
     ${getContextInfo}
-    
+    ${layerTargetHelpers}
+
     if (app.documents.length === 0) {
       throw new Error('No active document');
     }
     var doc = app.activeDocument;
-    var layer = doc.activeLayer;
+    var layer = __mcp_resolveLayer(doc, "${jsString(layerName)}", ${layerIndex});
+    // The Action Manager fallback below targets the ACTIVE layer, so make the
+    // resolved layer active first; the DOM path works either way.
+    try { doc.activeLayer = layer; } catch (eActivate) {}
     var token = "${jsString(blendMode)}";
     var applied = false;
     try {
@@ -1929,8 +2214,8 @@ export const ExtendScriptSnippets = {
       desc.putEnumerated(cTID('Md  '), cTID('BlnM'), sTID(amKey));
       executeAction(cTID('setd'), desc, DialogModes.NO);
     }
-    
-    var result = { 
+
+    var result = {
       updated: true,
       property: 'blendMode',
       value: String(layer.blendMode),
@@ -1943,53 +2228,62 @@ export const ExtendScriptSnippets = {
   /**
    * Set layer visibility
    */
-  setLayerVisibility: (visible: boolean) => `
+  setLayerVisibility: (visible: boolean, layerName = '', layerIndex = 0) => `
+    ${helperFunctions}
+    ${layerTargetHelpers}
+
     if (app.documents.length === 0) {
       throw new Error('No active document');
     }
     var doc = app.activeDocument;
-    var layer = doc.activeLayer;
-    
+    var layer = __mcp_resolveLayer(doc, "${jsString(layerName)}", ${layerIndex});
+
     layer.visible = ${visible};
-    
-    return { 
+
+    return {
       visible: layer.visible,
-      name: layer.name
+      layerName: layer.name
     };
   `,
 
   /**
    * Lock/unlock layer
    */
-  setLayerLocked: (locked: boolean) => `
+  setLayerLocked: (locked: boolean, layerName = '', layerIndex = 0) => `
+    ${helperFunctions}
+    ${layerTargetHelpers}
+
     if (app.documents.length === 0) {
       throw new Error('No active document');
     }
     var doc = app.activeDocument;
-    var layer = doc.activeLayer;
-    
+    var layer = __mcp_resolveLayer(doc, "${jsString(layerName)}", ${layerIndex});
+
     layer.allLocked = ${locked};
-    
-    return { 
+
+    return {
       locked: layer.allLocked,
-      name: layer.name
+      layerName: layer.name
     };
   `,
 
   /**
    * Rename active layer
    */
-  renameLayer: (newName: string) => `
+  renameLayer: (newName: string, layerName = '', layerIndex = 0) => `
+    ${helperFunctions}
+    ${layerTargetHelpers}
+
     if (app.documents.length === 0) {
       throw new Error('No active document');
     }
     var doc = app.activeDocument;
-    var layer = doc.activeLayer;
-    
+    var layer = __mcp_resolveLayer(doc, "${jsString(layerName)}", ${layerIndex});
+
     var oldName = layer.name;
     layer.name = "${jsString(newName)}";
-    
-    return { 
+
+    return {
       oldName: oldName,
       newName: layer.name
     };
@@ -3080,7 +3374,8 @@ export const ExtendScriptSnippets = {
       right_to_left: { fromH: endPct, fromV: 50, toH: startPct, toV: 50, reverse: false },
     };
     const endpoints = gradientEndpoints[direction];
-    const angle = angleDeg ?? (direction === 'left_to_right' || direction === 'right_to_left' ? 0 : 90);
+    const angle =
+      angleDeg ?? (direction === 'left_to_right' || direction === 'right_to_left' ? 0 : 90);
 
     return `
     ${helperFunctions}
@@ -3742,16 +4037,24 @@ export const ExtendScriptSnippets = {
   /**
    * Export a JPEG preview to the system temp folder. Returns filesystem path for Node to read.
    */
-  exportPreview: (maxDimension = 1024, jpegQuality = 8) => `
+  /**
+   * Export a JPEG preview of the document — or of a single layer.
+   *
+   * `layerName` solos the layer inside the duplicate: everything else is hidden
+   * and the copy is trimmed to the layer's content, so the caller sees just the
+   * pixels it asked about without touching the open document.
+   */
+  exportPreview: (maxDimension = 1024, jpegQuality = 8, layerName = '') => `
     ${getContextInfo}
+    ${layerTargetHelpers}
 
     if (app.documents.length === 0) {
       throw new Error('No active document');
     }
 
     var doc = app.activeDocument;
-    var w = doc.width.as('px');
-    var h = doc.height.as('px');
+    var docW = doc.width.as('px');
+    var docH = doc.height.as('px');
     var docName = '';
     try { docName = String(doc.name); } catch (eName) {}
     var colorMode = '';
@@ -3765,43 +4068,84 @@ export const ExtendScriptSnippets = {
         layerNames.push(String(doc.layers[li].name));
       }
     } catch (eLayers) {}
+
+    var targetLayerName = "${jsString(layerName)}";
     var maxDim = ${maxDimension};
+    var layerBounds = null;
+    var cropped = false;
+    var w = 0;
+    var h = 0;
     var scale = 1;
-    if (w > maxDim || h > maxDim) {
-      scale = maxDim / Math.max(w, h);
+
+    // No mergeLayersOnly here: the copy must keep its layer names, otherwise a
+    // single-layer preview has nothing to solo (duplicate(name, true) collapses
+    // every layer into the background and __mcp_soloLayer throws).
+    var dup = doc.duplicate('__mcp_preview__');
+    try {
+      if (targetLayerName) {
+        var target = __mcp_soloLayer(dup, targetLayerName);
+        try {
+          var tb = target.bounds;
+          layerBounds = {
+            left: tb[0].as('px'),
+            top: tb[1].as('px'),
+            width: tb[2].as('px') - tb[0].as('px'),
+            height: tb[3].as('px') - tb[1].as('px')
+          };
+        } catch (eBounds) {}
+        try {
+          dup.trim(TrimType.TRANSPARENT);
+          cropped = true;
+        } catch (eTrim) {}
+      }
+
+      w = dup.width.as('px');
+      h = dup.height.as('px');
+      if (w > maxDim || h > maxDim) {
+        scale = maxDim / Math.max(w, h);
+      }
+      if (scale < 1) {
+        dup.resizeImage(
+          UnitValue(Math.round(w * scale), 'px'),
+          UnitValue(Math.round(h * scale), 'px'),
+          doc.resolution,
+          ResampleMethod.BICUBIC
+        );
+      }
+
+      var saveOptions = new JPEGSaveOptions();
+      saveOptions.quality = ${jpegQuality};
+      saveOptions.embedColorProfile = true;
+      saveOptions.formatOptions = FormatOptions.STANDARDBASELINE;
+      var tmpFile = new File(Folder.temp.fsName + '/ps-preview-' + (new Date().getTime()) + '.jpg');
+      dup.flatten();
+      dup.saveAs(tmpFile, saveOptions, true);
+    } finally {
+      // The copy must always go away — a failed solo used to leave a stray
+      // "__mcp_preview__" document open in the user's workspace.
+      try { dup.close(SaveOptions.DONOTSAVECHANGES); } catch (eClose) {}
     }
 
-    var dup = doc.duplicate('__mcp_preview__', true);
-    if (scale < 1) {
-      dup.resizeImage(
-        UnitValue(Math.round(w * scale), 'px'),
-        UnitValue(Math.round(h * scale), 'px'),
-        doc.resolution,
-        ResampleMethod.BICUBIC
-      );
-    }
-
-    var tmpFile = new File(Folder.temp.fsName + '/ps-preview-' + (new Date().getTime()) + '.jpg');
-    var saveOptions = new JPEGSaveOptions();
-    saveOptions.quality = ${jpegQuality};
-    saveOptions.embedColorProfile = true;
-    saveOptions.formatOptions = FormatOptions.STANDARDBASELINE;
-    dup.flatten();
-    dup.saveAs(tmpFile, saveOptions, true);
-    dup.close(SaveOptions.DONOTSAVECHANGES);
-
-    return {
+    var payload = {
       path: tmpFile.fsName,
       width: Math.round(w * scale),
       height: Math.round(h * scale),
       mimeType: 'image/jpeg',
       documentId: docId,
       documentName: docName,
-      documentWidth: Math.round(w),
-      documentHeight: Math.round(h),
+      documentWidth: Math.round(docW),
+      documentHeight: Math.round(docH),
       colorMode: colorMode,
-      layers: layerNames
+      layers: layerNames,
+      cropped: cropped
     };
+    if (targetLayerName) {
+      payload.layerName = targetLayerName;
+      payload.sourceWidth = Math.round(w);
+      payload.sourceHeight = Math.round(h);
+      if (layerBounds) payload.layerBounds = layerBounds;
+    }
+    return payload;
   `,
 
   /**
@@ -4370,7 +4714,13 @@ export const ExtendScriptSnippets = {
   /**
    * Photo Filter adjustment layer (warming/cooling/tint with density).
    */
-  applyPhotoFilter: (red: number, green: number, blue: number, density: number, preserveLuminosity: boolean) => `
+  applyPhotoFilter: (
+    red: number,
+    green: number,
+    blue: number,
+    density: number,
+    preserveLuminosity: boolean
+  ) => `
     ${helperFunctions}
 
     if (app.documents.length === 0) {
@@ -4521,7 +4871,11 @@ export const ExtendScriptSnippets = {
   /**
    * Batch-export one file per data set: applies each data set then saves a copy.
    */
-  applyDataSetsExport: (outputDir: string, format: 'JPEG' | 'PNG' | 'PSD', datasetNames: string[]) => {
+  applyDataSetsExport: (
+    outputDir: string,
+    format: 'JPEG' | 'PNG' | 'PSD',
+    datasetNames: string[]
+  ) => {
     const escapedDir = jsString(outputDir);
     const namesJson = JSON.stringify(datasetNames);
     return `
@@ -4872,8 +5226,12 @@ export const ExtendScriptSnippets = {
       ok: true,
       path: "${escaped}",
       format: '${format}',
-      method: exported.method${abId !== null ? `,
-      artboard_id: ${abId}` : ''}
+      method: exported.method${
+        abId !== null
+          ? `,
+      artboard_id: ${abId}`
+          : ''
+      }
     };
   `;
   },
@@ -4908,9 +5266,7 @@ export const ExtendScriptSnippets = {
       throw new Error('No active document');
     }
 
-    var origin = ${
-      hasOrigin ? `{ left: ${left}, top: ${top} }` : `__mcp_nextArtboardOrigin()`
-    };
+    var origin = ${hasOrigin ? `{ left: ${left}, top: ${top} }` : `__mcp_nextArtboardOrigin()`};
     var leftPos = origin.left;
     var topPos = origin.top;
     var right = leftPos + ${w};

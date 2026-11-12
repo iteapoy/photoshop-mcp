@@ -4,6 +4,17 @@ import { PhotoshopAPIFactory } from '../api/photoshop-api.js';
 import { ExtendScriptSnippets } from '../api/extendscript.js';
 import { LAYER_BLEND_MODE_ENUM, resolveLayerBlendMode } from './blend-mode.js';
 
+/**
+ * Optional layer selector shared by the layer-property tools. Editing by name
+ * removes the "select first, then edit" round trip — and the silent risk of
+ * editing whatever happened to be active.
+ */
+const LAYER_NAME_PROPERTY = {
+  type: 'string',
+  description:
+    'Target layer by name (searches nested groups). Omit or leave empty to act on the active layer.',
+} as const;
+
 export function createLayerPropertiesTools(connection: PhotoshopConnection): ToolDefinition[] {
   return [
     {
@@ -21,7 +32,8 @@ export function createLayerPropertiesTools(connection: PhotoshopConnection): Too
       tool: {
         name: 'photoshop_set_layer_opacity',
         description:
-          'Set the active layer opacity to an absolute 0–100 value. The number replaces the current opacity; it is not added to it.\n\n' +
+          'Set a layer opacity to an absolute 0–100 value. The number replaces the current opacity; it is not added to it. ' +
+          'Pass layer_name to target a layer directly, otherwise the active layer is used.\n\n' +
           'Use when: the active layer should be more or less transparent.\n' +
           'Do NOT use when: the layer should be fully hidden from the stack — use photoshop_set_layer_visibility.\n' +
           'Do NOT use when: fading into the background with a mask gradient — use photoshop_recipe_gradient_fade.\n\n' +
@@ -36,6 +48,7 @@ export function createLayerPropertiesTools(connection: PhotoshopConnection): Too
               minimum: 0,
               maximum: 100,
             },
+            layer_name: { ...LAYER_NAME_PROPERTY },
           },
           required: ['opacity'],
         },
@@ -46,7 +59,7 @@ export function createLayerPropertiesTools(connection: PhotoshopConnection): Too
       tool: {
         name: 'photoshop_set_layer_blend_mode',
         description:
-          'Set the blend mode of the active layer.\n\n' +
+          'Set the blend mode of a layer (layer_name), or of the active layer when omitted.\n\n' +
           '`COLOR` is the Photoshop UI name (Colorize); it is mapped to ExtendScript `BlendMode.COLORBLEND`.',
         inputSchema: {
           type: 'object',
@@ -58,6 +71,7 @@ export function createLayerPropertiesTools(connection: PhotoshopConnection): Too
                 'DARKERCOLOR / LIGHTERCOLOR use Action Manager if the DOM enum is missing.',
               enum: [...LAYER_BLEND_MODE_ENUM],
             },
+            layer_name: { ...LAYER_NAME_PROPERTY },
           },
           required: ['blendMode'],
         },
@@ -67,7 +81,12 @@ export function createLayerPropertiesTools(connection: PhotoshopConnection): Too
     {
       tool: {
         name: 'photoshop_set_layer_visibility',
-        description: 'Show or hide the active layer',
+        description:
+          'Show or hide a layer. Pass layer_name to target it directly; omit to use the active layer.\n\n' +
+          'Use when: a layer should be hidden or revealed in one call.\n' +
+          'Do NOT use when: the whole group should toggle — name the group itself.\n\n' +
+          'Returns: the resolved layerName and its new visible flag.\n' +
+          'Preconditions: active document. Side effects: visibility only; idempotent; reversible.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -75,6 +94,7 @@ export function createLayerPropertiesTools(connection: PhotoshopConnection): Too
               type: 'boolean',
               description: 'Whether the layer should be visible',
             },
+            layer_name: { ...LAYER_NAME_PROPERTY },
           },
           required: ['visible'],
         },
@@ -85,12 +105,12 @@ export function createLayerPropertiesTools(connection: PhotoshopConnection): Too
       tool: {
         name: 'photoshop_set_layer_locked',
         description:
-          'Set the all-lock flag on the active layer. `locked: true` blocks further edits to that layer; `false` clears the lock.\n\n' +
+          'Set the all-lock flag on a layer (layer_name, or the active layer). `locked: true` blocks further edits to that layer; `false` clears the lock.\n\n' +
           'Use when: the user asks to lock or unlock the current layer.\n' +
           'Do NOT use when: the layer should only be hidden — use photoshop_set_layer_visibility.\n' +
-          'Do NOT use when: a different layer is the target — use photoshop_select_layer_by_name first.\n\n' +
+          'Do NOT use when: many layers need locking at once.\n\n' +
           'Returns: confirmation of the lock state.\n' +
-          'Preconditions: active document and active layer. Side effects: sets layer.allLocked. The same boolean is idempotent. Reversible with photoshop_undo or by calling again with the opposite value.',
+          'Preconditions: active document; layer_name or an active layer. Side effects: sets layer.allLocked. The same boolean is idempotent. Reversible with photoshop_undo or by calling again with the opposite value.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -98,6 +118,7 @@ export function createLayerPropertiesTools(connection: PhotoshopConnection): Too
               type: 'boolean',
               description: 'Whether the layer should be locked',
             },
+            layer_name: { ...LAYER_NAME_PROPERTY },
           },
           required: ['locked'],
         },
@@ -108,12 +129,12 @@ export function createLayerPropertiesTools(connection: PhotoshopConnection): Too
       tool: {
         name: 'photoshop_rename_layer',
         description:
-          'Rename the active layer. Does not change pixels, order, or visibility.\n\n' +
+          'Rename a layer (layer_name, or the active layer). Does not change pixels, order, or visibility.\n\n' +
           'Use when: the active layer needs a stable name for a later photoshop_select_layer_by_name.\n' +
           'Do NOT use when: many layers should be renamed by kind — use photoshop_recipe_organize_layers.\n' +
-          'Do NOT use when: a different layer is the target — use photoshop_select_layer_by_name first.\n\n' +
+          'Do NOT use when: many layers should be renamed by kind.\n\n' +
           'Returns: the new layer name.\n' +
-          'Preconditions: active document and active layer. Side effects: the name only. Setting the same name is idempotent. Reversible with photoshop_undo.',
+          'Preconditions: active document; layer_name or an active layer. Side effects: the name only. Setting the same name is idempotent. Reversible with photoshop_undo.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -121,6 +142,7 @@ export function createLayerPropertiesTools(connection: PhotoshopConnection): Too
               type: 'string',
               description: 'New name for the layer',
             },
+            layer_name: { ...LAYER_NAME_PROPERTY },
           },
           required: ['name'],
         },
@@ -192,7 +214,7 @@ async function setLayerOpacity(
     const apiFactory = new PhotoshopAPIFactory(connection);
     const api = await apiFactory.createAPI();
 
-    const script = ExtendScriptSnippets.setLayerOpacity(opacity);
+    const script = ExtendScriptSnippets.setLayerOpacity(opacity, layerName(args));
     await api.executeScript(script);
 
     return {
@@ -238,7 +260,7 @@ async function setLayerBlendMode(
     const apiFactory = new PhotoshopAPIFactory(connection);
     const api = await apiFactory.createAPI();
 
-    const script = ExtendScriptSnippets.setLayerBlendMode(extendScriptToken);
+    const script = ExtendScriptSnippets.setLayerBlendMode(extendScriptToken, layerName(args));
     await api.executeScript(script);
 
     return {
@@ -272,7 +294,7 @@ async function setLayerVisibility(
     const apiFactory = new PhotoshopAPIFactory(connection);
     const api = await apiFactory.createAPI();
 
-    const script = ExtendScriptSnippets.setLayerVisibility(visible);
+    const script = ExtendScriptSnippets.setLayerVisibility(visible, layerName(args));
     await api.executeScript(script);
 
     return {
@@ -306,7 +328,7 @@ async function setLayerLocked(
     const apiFactory = new PhotoshopAPIFactory(connection);
     const api = await apiFactory.createAPI();
 
-    const script = ExtendScriptSnippets.setLayerLocked(locked);
+    const script = ExtendScriptSnippets.setLayerLocked(locked, layerName(args));
     await api.executeScript(script);
 
     return {
@@ -340,7 +362,7 @@ async function renameLayer(
     const apiFactory = new PhotoshopAPIFactory(connection);
     const api = await apiFactory.createAPI();
 
-    const script = ExtendScriptSnippets.renameLayer(name);
+    const script = ExtendScriptSnippets.renameLayer(name, layerName(args));
     const result = await api.executeScript(script);
 
     return {
@@ -483,4 +505,10 @@ async function rasterizeLayer(connection: PhotoshopConnection): Promise<ToolResu
       isError: true,
     };
   }
+}
+
+/** `layer_name` argument, or '' for "use the active layer". */
+function layerName(args: Record<string, unknown>): string {
+  const raw = args.layer_name;
+  return typeof raw === 'string' ? raw.trim() : '';
 }

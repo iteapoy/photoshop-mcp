@@ -24,7 +24,7 @@
  */
 
 import { createServer } from 'node:http';
-import { appendFileSync, readFileSync, statSync } from 'node:fs';
+import { appendFileSync, readFileSync, renameSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -45,7 +45,7 @@ import {
 
 import {
   buildGroupedTools,
-  extractActionAndParams,
+  extractCall,
   loadGroupConfig,
   prepareArgs,
   resolveAction,
@@ -58,6 +58,21 @@ import {
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, '..');
 const LOG_FILE = join(homedir(), '.photoshop-mcp', 'bridge.log');
+// One JSON object per tool call: the only way to answer "which step was slow
+// or wrong" after a session. 5 MB then rotates to calls.jsonl.1.
+const CALL_LOG_FILE = join(homedir(), '.photoshop-mcp', 'calls.jsonl');
+const CALL_LOG_MAX_BYTES = 5 * 1024 * 1024;
+
+function rotateCallLog() {
+  try {
+    if (statSync(CALL_LOG_FILE).size > CALL_LOG_MAX_BYTES) {
+      renameSync(CALL_LOG_FILE, `${CALL_LOG_FILE}.1`);
+    }
+  } catch {
+    /* no log yet, or rotation is not possible — logging must never break the bridge */
+  }
+}
+rotateCallLog();
 
 // Same config the UI uses, so both surfaces hide the same unusable tools.
 const FILTER_FILE = join(homedir(), '.photoshop-mcp', 'tool-filter.json');
@@ -95,13 +110,11 @@ function loadDenylist() {
 }
 
 function parseArgs(argv) {
-  const out = { port: 38471, server: join(REPO_ROOT, 'dist', 'index.js'), grouped: null };
+  const out = { port: 38471, server: join(REPO_ROOT, 'dist', 'index.js') };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--port') out.port = Number(argv[++i]);
     else if (a === '--server') out.server = resolve(argv[++i]);
-    else if (a === '--grouped') out.grouped = true;
-    else if (a === '--flat') out.grouped = false;
   }
   return out;
 }
@@ -113,6 +126,26 @@ function log(...parts) {
     appendFileSync(LOG_FILE, line + '\n');
   } catch {
     /* logging must never break the bridge */
+  }
+}
+
+function logCall(entry) {
+  try {
+    appendFileSync(CALL_LOG_FILE, JSON.stringify(entry) + '\n');
+  } catch {
+    /* logging must never break the bridge */
+  }
+}
+
+function stringifyResult(result) {
+  try {
+    const text = (result?.content ?? [])
+      .filter((part) => part?.type === 'text')
+      .map((part) => part.text)
+      .join(' ');
+    return text.slice(0, 400);
+  } catch {
+    return '';
   }
 }
 
@@ -152,19 +185,16 @@ log(`upstream tools: ${toolCache.length}`);
 
 // ---------------------------------------------------------------------------
 // 1b. Grouped surface: 120 flat tools -> 12 "category tool + action" tools.
-//     Controlled by ~/.photoshop-mcp/tool-groups.json (hot reloaded) and the
-//     --grouped / --flat flags.
+//     There is no flat mode any more: 148k chars of per-tool schemas on every
+//     request was the whole reason this bridge exists. Hot reloaded from
+//     ~/.photoshop-mcp/tool-groups.json (rawTool / overrides only).
 // ---------------------------------------------------------------------------
-function groupedModeEnabled() {
-  if (args.grouped === true) return true;
-  if (args.grouped === false) return false;
-  return loadGroupConfig().enabled !== false;
-}
-
 let groupedMemo = null;
 function groupedSurface() {
   const cfg = loadGroupConfig();
-  const key = `${toolCache.map((t) => t.name).join('|')}#raw:${cfg.rawTool !== false}`;
+  const key =
+    `${toolCache.map((t) => t.name).join('|')}#raw:${cfg.rawTool !== false}` +
+    `#overrides:${JSON.stringify(cfg.overrides ?? {})}`;
   if (groupedMemo && groupedMemo.key === key) return groupedMemo;
   const built = buildGroupedTools(toolCache, cfg);
   const counts = {};
@@ -181,19 +211,55 @@ function textError(message) {
   return { content: [{ type: 'text', text: message }], isError: true };
 }
 
-async function forwardTool(name, toolArgs, meta, signal) {
+function logRejected(requested, tool, action, via, message) {
+  logCall({
+    ts: new Date().toISOString(),
+    requested,
+    tool,
+    action,
+    via,
+    ok: false,
+    duration_ms: 0,
+    error: 'invalid_arguments',
+    message: String(message).slice(0, 400),
+  });
+}
+
+async function forwardTool(name, toolArgs, meta, signal, context = {}) {
+  const started = Date.now();
+  const entry = {
+    ts: new Date().toISOString(),
+    requested: context.requested ?? name,
+    tool: name,
+    action: context.action ?? null,
+    via: context.via ?? 'grouped',
+    params: Object.keys(toolArgs ?? {}),
+  };
+
   if (loadDenylist().has(name)) {
+    logCall({ ...entry, ok: false, duration_ms: 0, error: 'disabled_by_tool_filter' });
     return textError(
       `Tool ${name} is disabled by ~/.photoshop-mcp/tool-filter.json (unsupported by this Photoshop build).`
     );
   }
   try {
-    return await child.callTool({ name, arguments: toolArgs ?? {}, _meta: meta }, undefined, {
+    const result = await child.callTool({ name, arguments: toolArgs ?? {}, _meta: meta }, undefined, {
       signal,
       timeout: 15 * 60 * 1000,
     });
+    const duration = Date.now() - started;
+    const failed = Boolean(result?.isError);
+    logCall({
+      ...entry,
+      ok: !failed,
+      duration_ms: duration,
+      ...(failed ? { error: stringifyResult(result) } : {}),
+    });
+    log(`call ${entry.requested}${entry.action ? `(${entry.action})` : ''} -> ${name} ${duration}ms ${failed ? 'ERROR' : 'ok'}`);
+    return result;
   } catch (err) {
     const message = err?.message ?? String(err);
+    logCall({ ...entry, ok: false, duration_ms: Date.now() - started, error: message });
     log(`callTool ${name} failed: ${message}`);
     return textError(`Tool ${name} failed: ${message}`);
   }
@@ -218,79 +284,95 @@ function buildServer() {
     } catch (err) {
       log('listTools failed, serving cache:', err?.message ?? String(err));
     }
-    if (!groupedModeEnabled()) return { tools: toolCache };
     return { tools: groupedSurface().tools };
   });
 
   server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
     const { name, arguments: toolArgs, _meta } = request.params;
+    const surface = groupedSurface();
 
-    if (groupedModeEnabled()) {
-      const surface = groupedSurface();
-
-      if (name === 'photoshop_schema') {
-        const wanted = toolArgs?.action ?? '';
-        const tool = resolveAction(toolCache, wanted);
-        if (!tool) {
-          return textError(
-            `Unknown action "${wanted}". Use "<group>/<action>" (e.g. "layer/get_layers") or the raw tool name.`
-          );
-        }
-        return {
-          content: [
-            {
-              type: 'text',
-              text: JSON.stringify(
-                {
-                  action: actionOf(tool.name),
-                  tool: tool.name,
-                  signature: paramSignature(tool),
-                  description: tool.description,
-                  schema: schemaOf(tool),
-                },
-                null,
-                2
-              ),
-            },
-          ],
-        };
+    if (name === 'photoshop_schema') {
+      const wanted = toolArgs?.action ?? '';
+      const tool = resolveAction(toolCache, wanted);
+      if (!tool) {
+        return textError(
+          `Unknown action "${wanted}". Use "<group>/<action>" (e.g. "layer/get_layers") or the raw tool name.`
+        );
       }
-
-      if (name === 'photoshop_call') {
-        const target = resolveAction(toolCache, toolArgs?.tool);
-        if (!target) {
-          return textError(
-            `Unknown tool "${toolArgs?.tool}". Call a group tool instead, or use photoshop_schema to look up the exact name.`
-          );
-        }
-        const prepared = prepareArgs(target, toolArgs?.arguments ?? {});
-        if (!prepared.ok) return textError(prepared.message);
-        return forwardTool(target.name, prepared.args, _meta, extra?.signal);
-      }
-
-      const actions = surface.index.get(name);
-      if (actions) {
-        const { action, params } = extractActionAndParams(toolArgs);
-        if (!action) {
-          return textError(`Missing "action". Available: ${[...actions.keys()].join(', ')}`);
-        }
-        let tool = actions.get(action);
-        if (!tool) {
-          // Tolerate an action that belongs to a sibling group.
-          tool = resolveAction(toolCache, action);
-        }
-        if (!tool) {
-          return textError(
-            `Unknown action "${action}" for ${name}. Available: ${[...actions.keys()].join(', ')}`
-          );
-        }
-        const prepared = prepareArgs(tool, params);
-        if (!prepared.ok) return textError(prepared.message);
-        return forwardTool(tool.name, prepared.args, _meta, extra?.signal);
-      }
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify(
+              {
+                action: actionOf(tool.name),
+                tool: tool.name,
+                signature: paramSignature(tool),
+                description: tool.description,
+                schema: schemaOf(tool),
+              },
+              null,
+              2
+            ),
+          },
+        ],
+      };
     }
 
-    return forwardTool(name, toolArgs, _meta, extra?.signal);
+    if (name === 'photoshop_call') {
+      // Same shape as a group tool: { tool, params }.
+      const { action: wantedTool, params } = extractCall(toolArgs, 'tool');
+      const target = resolveAction(toolCache, wantedTool);
+      if (!target) {
+        return textError(
+          `Unknown tool "${wantedTool}". Call a group tool instead, or use photoshop_schema to look up the exact name.`
+        );
+      }
+      const prepared = prepareArgs(target, params);
+      if (!prepared.ok) {
+        logRejected(name, target.name, actionOf(target.name), 'call', prepared.message);
+        return textError(prepared.message);
+      }
+      return forwardTool(target.name, prepared.args, _meta, extra?.signal, {
+        requested: name,
+        action: actionOf(target.name),
+        via: 'call',
+      });
+    }
+
+    const actions = surface.index.get(name);
+    if (!actions) {
+      return textError(
+        `Unknown tool "${name}". This bridge exposes group tools only: ` +
+          `${[...surface.index.keys()].join(', ')}. ` +
+          'Call photoshop_schema to look up a raw tool name, or photoshop_call to run it.'
+      );
+    }
+
+    const { action, params } = extractCall(toolArgs, 'action');
+    if (!action) {
+      return textError(`Missing "action". Available: ${[...actions.keys()].join(', ')}`);
+    }
+    let tool = actions.get(action);
+    if (!tool) {
+      // Tolerate an action that belongs to a sibling group.
+      tool = resolveAction(toolCache, action);
+    }
+    if (!tool) {
+      return textError(
+        `Unknown action "${action}" for ${name}. Available: ${[...actions.keys()].join(', ')}`
+      );
+    }
+    const prepared = prepareArgs(tool, params);
+    if (!prepared.ok) {
+      logRejected(name, tool.name, action, 'grouped', prepared.message);
+      return textError(prepared.message);
+    }
+    return forwardTool(tool.name, prepared.args, _meta, extra?.signal, {
+      requested: name,
+      action,
+      via: 'grouped',
+    });
   });
 
   server.setRequestHandler(ListPromptsRequestSchema, async () => {
@@ -347,16 +429,15 @@ const http = createServer(async (req, res) => {
   const url = new URL(req.url ?? '/', `http://127.0.0.1:${args.port}`);
 
   if (url.pathname === '/health') {
-    const grouped = groupedModeEnabled();
-    const surface = grouped ? groupedSurface() : null;
+    const surface = groupedSurface();
     res.writeHead(200, { 'content-type': 'application/json' });
     res.end(
       JSON.stringify({
         ok: true,
-        mode: grouped ? 'grouped' : 'flat',
-        exposed: surface ? surface.tools.length : toolCache.length,
+        mode: 'grouped',
+        exposed: surface.tools.length,
         upstreamTools: toolCache.length,
-        groups: surface ? surface.counts : undefined,
+        groups: surface.counts,
         config: GROUPS_FILE,
         upstream: info ?? null,
       })
@@ -398,8 +479,7 @@ const http = createServer(async (req, res) => {
 });
 
 http.listen(args.port, '127.0.0.1', () => {
-  const grouped = groupedModeEnabled();
-  const surface = grouped ? groupedSurface() : null;
+  const surface = groupedSurface();
   log(`bridge ready: http://127.0.0.1:${args.port}/mcp  (health: /health)`);
   process.stdout.write(
     [
@@ -408,8 +488,8 @@ http.listen(args.port, '127.0.0.1', () => {
       `  MCP endpoint : http://127.0.0.1:${args.port}/mcp`,
       `  Health check : http://127.0.0.1:${args.port}/health`,
       `  Upstream     : ${args.server}`,
-      `  Tool surface : ${grouped ? `grouped (${surface.tools.length} tools / ${toolCache.length} upstream)` : `flat (${toolCache.length} tools)`}`,
-      grouped ? `  Group config : ${GROUPS_FILE}  (edit to switch to flat: "enabled": false)` : '',
+      `  Tool surface : grouped (${surface.tools.length} tools / ${toolCache.length} upstream)`,
+      `  Group config : ${GROUPS_FILE}  (rawTool / overrides)`,
       '',
       'Keep this window open. In WorkBuddy: 连接器 → 自定义连接器 → 信任 photoshop.',
       '',
