@@ -45,6 +45,9 @@ export function createActionTools(connection: PhotoshopConnection): ToolDefiniti
           'IMPORTANT: Your code runs inside a wrapping IIFE. Use an explicit `return` to pass data back — ' +
           'a bare trailing expression returns undefined. Example: `return { ok: true };` ' +
           'Objects are serialized with toSource() and parsed automatically on macOS and Windows.\n' +
+          'ExtendScript has no guaranteed JSON global. Return objects directly instead of calling JSON.stringify. ' +
+          'For colors, use var c = new SolidColor(); c.rgb.red = 255; c.rgb.green = 0; c.rgb.blue = 0; ' +
+          'then pass c to APIs expecting a color. Use photoshop_schema for exact parameter names.\n' +
           'Long scripts: pass timeout_ms (up to 600000) so the default 30s budget does not kill the job.\n' +
           'Preconditions: valid ExtendScript; active document if script expects one. Side effects: depends on code.',
         inputSchema: {

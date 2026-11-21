@@ -161,7 +161,7 @@ export function createLayerTools(connection: PhotoshopConnection): ToolDefinitio
       tool: {
         name: 'photoshop_fill_layer',
         description:
-          'Fill the active layer with a solid RGB color. If a selection exists, only that region is filled and the selection stays; otherwise the whole layer is filled and the selection is cleared.\n\n' +
+          'Fill a named layer, or the active layer when layer_name is omitted, with a solid RGB color. If a selection exists, only that region is filled and the selection stays; otherwise the whole layer is filled and the selection is cleared.\n\n' +
           'Use when: a flat color fill on the active layer or on the current selection.\n' +
           'Do NOT use when: a new empty layer is needed first — use photoshop_create_layer, then this.\n' +
           'Do NOT use when: the fill should be a two-color gradient — use photoshop_fill_gradient.\n' +
@@ -173,6 +173,11 @@ export function createLayerTools(connection: PhotoshopConnection): ToolDefinitio
         inputSchema: {
           type: 'object',
           properties: {
+            layer_name: {
+              type: 'string',
+              minLength: 1,
+              description: 'Exact target layer name, including nested groups. Duplicate names return an error. Omit to use the active layer.',
+            },
             red: {
               type: 'number',
               description: 'Red component (0-255)',
@@ -201,7 +206,7 @@ export function createLayerTools(connection: PhotoshopConnection): ToolDefinitio
       tool: {
         name: 'photoshop_fill_gradient',
         description:
-          'Paint a two-color linear gradient on the active layer pixels.\n\n' +
+          'Paint a two-color linear gradient on a named layer, or the active layer when layer_name is omitted.\n\n' +
           'Use when: the user asks for a color gradient, blend, or "mavi yeşil" style ramp on a layer.\n' +
           'Do NOT use when: a flat color is enough — use photoshop_fill_layer.\n' +
           'Do NOT use when: the gradient should fade the layer into the background — use photoshop_recipe_gradient_fade.\n' +
@@ -211,6 +216,11 @@ export function createLayerTools(connection: PhotoshopConnection): ToolDefinitio
         inputSchema: {
           type: 'object',
           properties: {
+            layer_name: {
+              type: 'string',
+              minLength: 1,
+              description: 'Exact target layer name, including nested groups. Duplicate names return an error. Omit to use the active layer.',
+            },
             fromRed: { type: 'number', description: 'Start red (0-255)', minimum: 0, maximum: 255 },
             fromGreen: {
               type: 'number',
@@ -405,17 +415,13 @@ async function fillLayer(
     const apiFactory = new PhotoshopAPIFactory(connection);
     const api = await apiFactory.createAPI();
 
-    const script = ExtendScriptSnippets.fillLayer(red, green, blue);
-    await api.executeScript(script);
+    const script = ExtendScriptSnippets.fillLayer(
+      colorByte(red, 'red'), colorByte(green, 'green'), colorByte(blue, 'blue'),
+      fillTargetName(args)
+    );
+    const raw = await api.executeScript(script);
+    return atomicSuccess('Layer filled', parseSnippetResult(raw) ?? { result: raw });
 
-    return {
-      content: [
-        {
-          type: 'text' as const,
-          text: `Layer filled with RGB(${red}, ${green}, ${blue})`,
-        },
-      ],
-    };
   } catch (error) {
     return {
       content: [
@@ -481,17 +487,11 @@ async function fillGradient(
       toRed,
       toGreen,
       toBlue,
-      direction
+      direction,
+      fillTargetName(args)
     );
-    await api.executeScript(script);
-    return {
-      content: [
-        {
-          type: 'text' as const,
-          text: `Layer filled with gradient RGB(${fromRed}, ${fromGreen}, ${fromBlue}) to RGB(${toRed}, ${toGreen}, ${toBlue}) ${direction}`,
-        },
-      ],
-    };
+    const raw = await api.executeScript(script);
+    return atomicSuccess('Gradient filled', parseSnippetResult(raw) ?? { result: raw });
   } catch (error) {
     return {
       content: [
@@ -568,4 +568,13 @@ async function selectLayerByName(
       isError: true,
     };
   }
+}
+
+
+function fillTargetName(args: Record<string, unknown>): string | undefined {
+  if (args.layer_name === undefined) return undefined;
+  if (typeof args.layer_name !== 'string' || !args.layer_name.trim()) {
+    throw new Error('layer_name must be a non-empty string');
+  }
+  return args.layer_name;
 }

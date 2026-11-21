@@ -1753,11 +1753,30 @@ export const ExtendScriptSnippets = {
    * selection, otherwise select the whole canvas, fill, then deselect.
    * Background / fully-locked layers cannot be filled, so fail clearly.
    */
-  fillLayer: (red: number, green: number, blue: number) => `
+  fillLayer: (red: number, green: number, blue: number, layerName?: string) => `
     if (app.documents.length === 0) {
       throw new Error('No active document');
     }
     var doc = app.activeDocument;
+
+    ${layerName === undefined ? '' : `
+    var targetName = ${JSON.stringify(layerName)};
+    var matches = [];
+    function findFillTarget(container) {
+      for (var i = 0; i < container.layers.length; i++) {
+        var candidate = container.layers[i];
+        if (candidate.name === targetName) matches.push(candidate);
+        if (candidate.typename === 'LayerSet') findFillTarget(candidate);
+      }
+    }
+    findFillTarget(doc);
+    if (matches.length === 0) throw new Error('Layer not found: ' + targetName);
+    if (matches.length > 1) throw new Error('Ambiguous layer name: ' + targetName);
+    if (matches[0].typename !== 'ArtLayer') throw new Error('Cannot fill a layer group');
+    if (matches[0].allLocked) throw new Error('Cannot fill a fully locked layer: ' + targetName);
+    if (matches[0].kind === LayerKind.TEXT) throw new Error('Cannot fill a text layer: ' + targetName);
+    doc.activeLayer = matches[0];
+    `}
     var layer = doc.activeLayer;
 
     if (layer.allLocked) {
@@ -1797,6 +1816,7 @@ export const ExtendScriptSnippets = {
       filled: true,
       rasterized: rasterized,
       layerName: layer.name,
+      layer_id: layer.id,
       color: { red: ${red}, green: ${green}, blue: ${blue} }
     };
   `,
@@ -1812,7 +1832,8 @@ export const ExtendScriptSnippets = {
     toRed: number,
     toGreen: number,
     toBlue: number,
-    direction: 'left_to_right' | 'right_to_left' | 'top_to_bottom' | 'bottom_to_top'
+    direction: 'left_to_right' | 'right_to_left' | 'top_to_bottom' | 'bottom_to_top',
+    layerName?: string
   ) => {
     const axis = {
       left_to_right: { fromH: 0, fromV: 50, toH: 100, toV: 50 },
@@ -1826,6 +1847,25 @@ export const ExtendScriptSnippets = {
       throw new Error('No active document');
     }
     var doc = app.activeDocument;
+
+    ${layerName === undefined ? '' : `
+    var targetName = ${JSON.stringify(layerName)};
+    var matches = [];
+    function findFillTarget(container) {
+      for (var i = 0; i < container.layers.length; i++) {
+        var candidate = container.layers[i];
+        if (candidate.name === targetName) matches.push(candidate);
+        if (candidate.typename === 'LayerSet') findFillTarget(candidate);
+      }
+    }
+    findFillTarget(doc);
+    if (matches.length === 0) throw new Error('Layer not found: ' + targetName);
+    if (matches.length > 1) throw new Error('Ambiguous layer name: ' + targetName);
+    if (matches[0].typename !== 'ArtLayer') throw new Error('Cannot fill a layer group');
+    if (matches[0].allLocked) throw new Error('Cannot fill a fully locked layer: ' + targetName);
+    if (matches[0].kind === LayerKind.TEXT) throw new Error('Cannot fill a text layer: ' + targetName);
+    doc.activeLayer = matches[0];
+    `}
     var layer = doc.activeLayer;
     if (!layer) throw new Error('No active layer');
     if (layer.allLocked) {
@@ -1914,6 +1954,7 @@ export const ExtendScriptSnippets = {
     return {
       filled: true,
       layerName: layer.name,
+      layer_id: layer.id,
       direction: '${direction}',
       from: { red: ${fromRed}, green: ${fromGreen}, blue: ${fromBlue} },
       to: { red: ${toRed}, green: ${toGreen}, blue: ${toBlue} }
@@ -5720,22 +5761,42 @@ export const ExtendScriptSnippets = {
     var dashOn = ${dash};
     var gapOff = ${gap};
 
+    // Keep subpaths separate and approximate cubic curves at subpixel intervals.
     function __mcp_flattenPath(path) {
-      var pts = [];
-      try {
-        var subs = path.subPathItems;
-        for (var s = 0; s < subs.length; s++) {
-          var pathPts = subs[s].pathPoints;
-          for (var p = 0; p < pathPts.length; p++) {
-            var anchor = pathPts[p].anchor;
-            pts.push([anchor[0], anchor[1]]);
+      var paths = [];
+      var subs = path.subPathItems;
+      for (var s = 0; s < subs.length; s++) {
+        var nodes = subs[s].pathPoints;
+        if (nodes.length < 2) continue;
+        var pts = [[nodes[0].anchor[0], nodes[0].anchor[1]]];
+        var count = subs[s].closed ? nodes.length : nodes.length - 1;
+        for (var n = 0; n < count; n++) {
+          var first = nodes[n];
+          var next = nodes[(n + 1) % nodes.length];
+          var a = first.anchor, b = first.rightDirection;
+          var c = next.leftDirection, d = next.anchor;
+          function distance(p, q) {
+            var x = p[0] - q[0], y = p[1] - q[1];
+            return Math.sqrt(x*x + y*y);
+          }
+          var steps = Math.max(1, Math.ceil(
+            (distance(a,b) + distance(b,c) + distance(c,d)) * 2
+          ));
+          if (steps > 100000) throw new Error('Path segment is too large to sample');
+          for (var j = 1; j <= steps; j++) {
+            var t = j / steps, u = 1 - t;
+            pts.push([
+              u*u*u*a[0] + 3*u*u*t*b[0] + 3*u*t*t*c[0] + t*t*t*d[0],
+              u*u*u*a[1] + 3*u*u*t*b[1] + 3*u*t*t*c[1] + t*t*t*d[1]
+            ]);
           }
         }
-      } catch (eFlat) {}
-      return pts;
+        paths.push(pts);
+      }
+      return paths;
     }
 
-    function __mcp_segmentLengths(pts, closed) {
+    function __mcp_segmentLengths(pts) {
       var cum = [0];
       var total = 0;
       for (var i = 1; i < pts.length; i++) {
@@ -5744,15 +5805,10 @@ export const ExtendScriptSnippets = {
         total += Math.sqrt(dx*dx + dy*dy);
         cum.push(total);
       }
-      if (closed && pts.length > 2) {
-        var dxc = pts[0][0] - pts[pts.length-1][0];
-        var dyc = pts[0][1] - pts[pts.length-1][1];
-        total += Math.sqrt(dxc*dxc + dyc*dyc);
-      }
       return { cum: cum, total: total };
     }
 
-    function __mcp_pointAt(pts, meta, dist, closed) {
+    function __mcp_pointAt(pts, meta, dist) {
       if (dist <= 0) return pts[0];
       if (dist >= meta.total) return pts[pts.length - 1];
       var cum = meta.cum;
@@ -5768,33 +5824,33 @@ export const ExtendScriptSnippets = {
       return [a[0] + (b[0]-a[0])*u, a[1] + (b[1]-a[1])*u];
     }
 
-    var isClosed = false;
-    try { isClosed = target.subPathItems && target.subPathItems.length > 0 && target.subPathItems[0].closed; } catch (eC) {}
-
     if (dashOn > 0 && gapOff > 0) {
-      // Dashed: build on-segments as separate open subpaths, stroke once.
-      var flat = __mcp_flattenPath(target);
-      if (flat.length < 2) {
+      var paths = __mcp_flattenPath(target);
+      if (!paths.length) {
         return { ok: false, code: 'invalid_arguments', message: 'Path has too few points to dash' };
       }
-      var meta = __mcp_segmentLengths(flat, isClosed);
       var segs = [];
-      var pos = 0;
-      var guard = 0;
-      while (pos < meta.total && guard < 10000) {
-        var end = Math.min(pos + dashOn, meta.total);
-        var a = __mcp_pointAt(flat, meta, pos, isClosed);
-        var b = __mcp_pointAt(flat, meta, end, isClosed);
-        var seg = [];
-        // sample the dash into ~6 anchor points for smoother curves
-        for (var k = 0; k <= 6; k++) {
-          var dd = pos + (end - pos) * (k / 6);
-          var pt = __mcp_pointAt(flat, meta, dd, isClosed);
-          seg.push(__mcp_pt(pt[0], pt[1]));
+      for (var pathIndex = 0; pathIndex < paths.length; pathIndex++) {
+        var flat = paths[pathIndex];
+        var meta = __mcp_segmentLengths(flat);
+        var pos = 0;
+        while (pos < meta.total) {
+          if (segs.length >= 10000) throw new Error('Dashed stroke exceeds 10000 dashes');
+          var end = Math.min(pos + dashOn, meta.total);
+          var seg = [];
+          // Preserve sampled curve and corner vertices within each dash.
+          var startPoint = __mcp_pointAt(flat, meta, pos);
+          seg.push(__mcp_pt(startPoint[0], startPoint[1]));
+          for (var k = 1; k < flat.length - 1; k++) {
+            if (meta.cum[k] > pos && meta.cum[k] < end) {
+              seg.push(__mcp_pt(flat[k][0], flat[k][1]));
+            }
+          }
+          var endPoint = __mcp_pointAt(flat, meta, end);
+          seg.push(__mcp_pt(endPoint[0], endPoint[1]));
+          segs.push(seg);
+          pos = end + gapOff;
         }
-        segs.push(seg);
-        pos = end + gapOff;
-        guard++;
       }
       try {
         for (var sIdx = 0; sIdx < segs.length; sIdx++) {
@@ -5803,8 +5859,11 @@ export const ExtendScriptSnippets = {
           try { sp.operation = ShapeOperation.SHAPEADD; } catch (eOp2) {}
           sp.entireSubPath = segs[sIdx];
           var dashPath = doc.pathItems.add('__mcp_dash_' + sIdx, [sp]);
-          dashPath.strokePath(ToolType.PENCIL, false);
-          dashPath.remove();
+          try {
+            dashPath.strokePath(ToolType.PENCIL, false);
+          } finally {
+            dashPath.remove();
+          }
         }
       } catch (eDash) {
         return { ok: false, code: 'extendscript_runtime_error', message: 'Dashed stroke failed: ' + (eDash.message || String(eDash)) };
