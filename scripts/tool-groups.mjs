@@ -263,8 +263,18 @@ function compactDesc(text, max = 72) {
 // umbrella tool construction
 // ---------------------------------------------------------------------------
 export function buildGroupedTools(tools, config = loadGroupConfig()) {
+  const mergedAdjustments = new Set([
+    'photoshop_create_black_and_white_adjustment_layer',
+    'photoshop_create_posterize_adjustment_layer',
+    'photoshop_create_threshold_adjustment_layer',
+    'photoshop_adjust_exposure', 'photoshop_adjust_vibrance',
+    'photoshop_adjust_curves', 'photoshop_apply_photo_filter',
+    'photoshop_apply_lut', 'photoshop_apply_gradient_map',
+  ]);
+  const hasUnifiedAdjustment = tools.some((tool) => tool.name === 'photoshop_create_adjustment_layer');
   const byGroup = new Map();
   for (const tool of tools) {
+    if (hasUnifiedAdjustment && mergedAdjustments.has(tool.name)) continue;
     const g = groupOf(tool.name, config);
     if (!GROUPS[g]) {
       // Unknown override target: fall back so the tool is never lost.
@@ -289,14 +299,14 @@ export function buildGroupedTools(tools, config = loadGroupConfig()) {
     const meta = GROUPS[g];
     const name = `photoshop_${g}`;
     const actionLines = list.map(
-      (t) => `- ${actionOf(t.name)}${paramSignature(t)} — ${compactDesc(t.description)}`
+      (t) => `- ${actionOf(t.name)} — ${compactDesc(t.description)}`
     );
 
     umbrellas.push({
       name,
       description:
         `${meta.desc}\n` +
-        `Pick one action below, put its parameters in "params" (* = required).\n` +
+        `Choose an action, query photoshop_schema with "<group>/<action>" for its parameters, then pass them in "params".\n` +
         actionLines.join('\n'),
       inputSchema: {
         type: 'object',
@@ -308,7 +318,7 @@ export function buildGroupedTools(tools, config = loadGroupConfig()) {
           },
           params: {
             type: 'object',
-            description: 'Parameters for the chosen action (see the action list in this tool description).',
+            description: 'Parameters returned by photoshop_schema for the chosen action.',
             additionalProperties: true,
           },
         },
@@ -324,7 +334,7 @@ export function buildGroupedTools(tools, config = loadGroupConfig()) {
     name: 'photoshop_schema',
     description:
       'Return the full JSON Schema of one action, e.g. action "layer/get_layers". ' +
-      'Use this when an action needs complex or nested parameters and the compact signature in the group description is not enough.',
+      'Query this before calling an action to discover its accepted parameters, required fields, and defaults. Reuse the schema for subsequent calls to the same action.',
     inputSchema: {
       type: 'object',
       properties: {

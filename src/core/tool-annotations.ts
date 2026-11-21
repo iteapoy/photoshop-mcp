@@ -149,6 +149,7 @@ export const TOOL_ANNOTATIONS: Record<string, PhotoshopToolAnnotations> = {
   photoshop_create_black_and_white_adjustment_layer: edit(false),
   photoshop_create_posterize_adjustment_layer: edit(false),
   photoshop_create_threshold_adjustment_layer: edit(false),
+  photoshop_create_adjustment_layer: edit(false),
   photoshop_apply_gradient_map: edit(false),
 
   photoshop_list_datasets: read,

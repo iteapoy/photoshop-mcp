@@ -1,5 +1,6 @@
 import { ToolDefinition, ToolResult } from '../core/tool-registry.js';
 import { PhotoshopConnection } from '../platform/connection.js';
+import { createAdjustmentTools } from './adjustment-tools.js';
 import { ExtendScriptSnippets } from '../api/extendscript.js';
 import {
   atomicFailureFromError,
@@ -14,7 +15,7 @@ function clampNumber(value: unknown, min: number, max: number, fallback: number)
 }
 
 export function createColorAdjustmentTools(connection: PhotoshopConnection): ToolDefinition[] {
-  return [
+  const definitions: ToolDefinition[] = [
     {
       tool: {
         name: 'photoshop_create_black_and_white_adjustment_layer',
@@ -151,6 +152,78 @@ export function createColorAdjustmentTools(connection: PhotoshopConnection): Too
       handler: async (args) => applyGradientMap(connection, args),
     },
   ];
+  const sources = [...definitions, ...createAdjustmentTools(connection)];
+  const types = {
+    black_and_white: 'photoshop_create_black_and_white_adjustment_layer',
+    posterize: 'photoshop_create_posterize_adjustment_layer',
+    threshold: 'photoshop_create_threshold_adjustment_layer',
+    exposure: 'photoshop_adjust_exposure',
+    vibrance: 'photoshop_adjust_vibrance',
+    curves: 'photoshop_adjust_curves',
+    photo_filter: 'photoshop_apply_photo_filter',
+    color_lookup: 'photoshop_apply_lut',
+    gradient_map: 'photoshop_apply_gradient_map',
+  };
+  const variants = Object.entries(types).map(([type, name]) => {
+    const source = sources.find((definition) => definition.tool.name === name)!;
+    return { type, source };
+  });
+  const unified: ToolDefinition = {
+    tool: {
+      name: 'photoshop_create_adjustment_layer',
+      description: 'Create an editable adjustment layer. Choose type and supply only parameters supported by that type. Query photoshop_schema for the complete per-type schemas.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          type: { type: 'string', enum: Object.keys(types) },
+          params: { type: 'object', additionalProperties: true },
+        },
+        required: ['type'],
+        additionalProperties: false,
+        oneOf: variants.map(({ type, source }) => ({
+          properties: {
+            type: { const: type },
+            params: { ...source.tool.inputSchema, additionalProperties: false },
+          },
+          ...(source.tool.inputSchema.required?.length ? { required: ['params'] } : {}),
+        })),
+      },
+    },
+    handler: async (args) => {
+      const variant = variants.find((entry) => entry.type === args.type);
+      if (!variant) return atomicFailureFromError(new Error('Invalid adjustment layer type'));
+      if (Object.keys(args).some((key) => key !== 'type' && key !== 'params')) {
+        return atomicFailureFromError(new Error('Only type and params are accepted'));
+      }
+      const params = args.params ?? {};
+      if (typeof params !== 'object' || Array.isArray(params)) {
+        return atomicFailureFromError(new Error('params must be an object'));
+      }
+      const schema = variant.source.tool.inputSchema;
+      const properties = schema.properties ?? {};
+      for (const required of schema.required ?? []) {
+        if (!(required in params)) return atomicFailureFromError(new Error(required + ' is required'));
+      }
+      for (const [key, value] of Object.entries(params)) {
+        const rule = properties[key] as {
+          type?: string; minimum?: number; maximum?: number; enum?: unknown[];
+        } | undefined;
+        if (!rule) return atomicFailureFromError(new Error('Unsupported parameter: ' + key));
+        const validType = rule.type === 'integer'
+          ? typeof value === 'number' && Number.isInteger(value)
+          : typeof value === rule.type;
+        if (!validType || (typeof value === 'number' && (
+          !Number.isFinite(value) ||
+          (rule.minimum !== undefined && value < rule.minimum) ||
+          (rule.maximum !== undefined && value > rule.maximum)
+        )) || (rule.enum && !rule.enum.includes(value))) {
+          return atomicFailureFromError(new Error('Invalid parameter: ' + key));
+        }
+      }
+      return variant.source.handler(params as Record<string, unknown>);
+    },
+  };
+  return [unified, ...definitions];
 }
 
 async function runAdjustmentSnippet(

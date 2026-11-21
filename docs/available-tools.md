@@ -1,6 +1,6 @@
 # Available Tools
 
-**131 tools total** — 114 atomic `photoshop_*` tools plus 17 recipe `photoshop_recipe_*` workflows (single undo step each).
+**136 tools total** — 119 atomic `photoshop_*` tools plus 17 recipe `photoshop_recipe_*` workflows (single undo step each).
 
 Reference for all atomic `photoshop_*` MCP tools exposed by this server (parameters, examples, and return shapes).
 
@@ -1360,3 +1360,15 @@ Export a copy as PNG/JPEG (Save for Web) or WebP/AVIF (native, PS 23.2+). Return
 - `format` (string, optional): `PNG` | `JPEG` | `WEBP` | `AVIF` (default PNG)
 - `quality` (number, optional): 0-100 (default 80)
 - `artboard_id` (number, optional): export only that artboard (from `photoshop_list_artboards`)
+
+#### `photoshop_create_adjustment_layer`
+
+Create an editable adjustment layer using `{ type, params }`. Supported types
+are `black_and_white`, `posterize`, `threshold`, `exposure`, `vibrance`,
+`curves`, `photo_filter`, `color_lookup`, and `gradient_map`.
+Parameters match the corresponding legacy tool. Unknown parameters, incorrect
+types, and out-of-range values return an error before Photoshop is called.
+Legacy tools remain callable for compatibility. The HTTP grouped surface shows
+`adjust/create_adjustment_layer` in place of the nine individual actions.
+
+Example: `{ "type": "threshold", "params": { "level": 160 } }`.
