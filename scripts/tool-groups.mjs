@@ -89,6 +89,10 @@ export const GROUPS = {
     order: 12,
     desc: 'Bridge/system: ping, version, capabilities, undo/redo, play action, run ExtendScript.',
   },
+  path: {
+    order: 13,
+    desc: 'Vector paths & pen: create path, stroke path (solid or dashed), fill path, delete path.',
+  },
 };
 
 const SYSTEM_TOOLS = new Set([
@@ -194,6 +198,7 @@ export function groupOf(toolName, config = loadGroupConfig()) {
   ) {
     return 'adjust';
   }
+  if (s.endsWith('_path') || s === 'create_path') return 'path';
   if (s.includes('fill') || s.includes('gradient')) return 'fill';
   if (
     s.includes('layer') ||

@@ -5557,6 +5557,376 @@ export const ExtendScriptSnippets = {
     };
   `;
   },
+
+  /**
+   * Create (or replace) a work path from an array of subpaths. Each subpath is an
+   * array of points; a point is [x, y] for a corner anchor, or an object
+   * { anchor: [x,y], leftDirection: [x,y], rightDirection: [x,y] } for a smooth
+   * (bezier) anchor. `closed` mirrors onto each subpath. This builds the path via
+   * Action Manager (make path) because the DOM `pathItems.add()` is unreliable on
+   * some bridge/version combinations.
+   */
+  createPath: (
+    subpaths: string,
+    closed: boolean,
+    name: string
+  ) => `
+    ${helperFunctions}
+    ${selectionHelpers}
+    ${getContextInfo}
+
+    if (app.documents.length === 0) {
+      return { ok: false, code: 'no_document', message: 'No active document' };
+    }
+    var doc = app.activeDocument;
+
+    function __mcp_pt(x, y) {
+      var p = new PathPointInfo();
+      p.anchor = [x, y];
+      p.leftDirection = [x, y];
+      p.rightDirection = [x, y];
+      p.kind = PointKind.CORNERPOINT;
+      return p;
+    }
+    function __mcp_ptBezier(anchor, left, right) {
+      var p = new PathPointInfo();
+      p.anchor = anchor;
+      p.leftDirection = left;
+      p.rightDirection = right;
+      p.kind = PointKind.SMOOTHPOINT;
+      return p;
+    }
+
+    var raw = ${subpaths};
+    if (!raw || !raw.length) {
+      return { ok: false, code: 'invalid_arguments', message: 'subpaths must be a non-empty array' };
+    }
+
+    var subPathInfos = [];
+    var anyBezier = false;
+    for (var i = 0; i < raw.length; i++) {
+      var sub = raw[i];
+      if (!sub || !sub.length) {
+        return { ok: false, code: 'invalid_arguments', message: 'each subpath must be a non-empty array of points' };
+      }
+      var pts = [];
+      for (var j = 0; j < sub.length; j++) {
+        var q = sub[j];
+        if (q && q.anchor && q.anchor.length === 2) {
+          anyBezier = true;
+          pts.push(__mcp_ptBezier(
+            q.anchor,
+            q.leftDirection && q.leftDirection.length === 2 ? q.leftDirection : q.anchor,
+            q.rightDirection && q.rightDirection.length === 2 ? q.rightDirection : q.anchor
+          ));
+        } else if (q && q.length === 2) {
+          pts.push(__mcp_pt(q[0], q[1]));
+        } else {
+          return { ok: false, code: 'invalid_arguments', message: 'each point must be [x,y] or {anchor,leftDirection,rightDirection}' };
+        }
+      }
+      var sp = new SubPathInfo();
+      sp.closed = ${closed};
+      // Required on PS 22 (SubPathInfo is "uninitialized" without an operation).
+      try { sp.operation = ShapeOperation.SHAPEADD; } catch (eOp) {}
+      sp.entireSubPath = pts;
+      subPathInfos.push(sp);
+    }
+
+    var pathName = ${JSON.stringify(name)} || 'Work Path';
+
+    // Remove any existing path with the same name so we replace, not stack.
+    try {
+      for (var k = doc.pathItems.length - 1; k >= 0; k--) {
+        if (String(doc.pathItems[k].name) === pathName) {
+          doc.pathItems[k].remove();
+        }
+      }
+    } catch (eDel) {}
+
+    var created = null;
+    try {
+      created = doc.pathItems.add(pathName, subPathInfos);
+    } catch (eDom) {
+      return { ok: false, code: 'extendscript_runtime_error', message: 'Unable to create path: ' + (eDom.message || String(eDom)) };
+    }
+
+    if (!created) {
+      return { ok: false, code: 'extendscript_runtime_error', message: 'pathItems.add returned nothing' };
+    }
+
+    return {
+      ok: true,
+      name: created.name,
+      pathCount: doc.pathItems.length,
+      subpaths: raw.length,
+      hasBezier: anyBezier,
+      context: getContextInfo()
+    };
+  `,
+
+  /**
+   * Stroke a named path onto the active layer with a solid RGB line. The stroke
+   * uses the foreground color via the DOM path.strokePath(), which is reliable
+   * across PS versions (unlike the Action Manager "stroke path" descriptor).
+   *
+   * Dash/dot support: when `dash` and `gap` are > 0, the path is split into
+   * discrete on/off segments and each "on" segment is drawn as its own open
+   * subpath, then all are stroked in one pass. This produces a true dashed line
+   * without depending on brush-spacing presets.
+   */
+  strokePath: (
+    name: string,
+    red: number,
+    green: number,
+    blue: number,
+    dash: number,
+    gap: number
+  ) => `
+    ${helperFunctions}
+    ${selectionHelpers}
+    ${getContextInfo}
+
+    if (app.documents.length === 0) {
+      return { ok: false, code: 'no_document', message: 'No active document' };
+    }
+    var doc = app.activeDocument;
+
+    var target = null;
+    try {
+      for (var i = 0; i < doc.pathItems.length; i++) {
+        if (String(doc.pathItems[i].name) === ${JSON.stringify(name)}) { target = doc.pathItems[i]; break; }
+      }
+    } catch (eFind) {}
+    if (!target) {
+      return { ok: false, code: 'invalid_arguments', message: 'No path named "' + ${JSON.stringify(name)} + '"' };
+    }
+
+    function __mcp_pt(x, y) {
+      var p = new PathPointInfo();
+      p.anchor = [x, y];
+      p.leftDirection = [x, y];
+      p.rightDirection = [x, y];
+      p.kind = PointKind.CORNERPOINT;
+      return p;
+    }
+
+    var color = new SolidColor();
+    color.rgb.red = ${red};
+    color.rgb.green = ${green};
+    color.rgb.blue = ${blue};
+    app.foregroundColor = color;
+
+    var dashOn = ${dash};
+    var gapOff = ${gap};
+
+    function __mcp_flattenPath(path) {
+      var pts = [];
+      try {
+        var subs = path.subPathItems;
+        for (var s = 0; s < subs.length; s++) {
+          var pathPts = subs[s].pathPoints;
+          for (var p = 0; p < pathPts.length; p++) {
+            var anchor = pathPts[p].anchor;
+            pts.push([anchor[0], anchor[1]]);
+          }
+        }
+      } catch (eFlat) {}
+      return pts;
+    }
+
+    function __mcp_segmentLengths(pts, closed) {
+      var cum = [0];
+      var total = 0;
+      for (var i = 1; i < pts.length; i++) {
+        var dx = pts[i][0] - pts[i-1][0];
+        var dy = pts[i][1] - pts[i-1][1];
+        total += Math.sqrt(dx*dx + dy*dy);
+        cum.push(total);
+      }
+      if (closed && pts.length > 2) {
+        var dxc = pts[0][0] - pts[pts.length-1][0];
+        var dyc = pts[0][1] - pts[pts.length-1][1];
+        total += Math.sqrt(dxc*dxc + dyc*dyc);
+      }
+      return { cum: cum, total: total };
+    }
+
+    function __mcp_pointAt(pts, meta, dist, closed) {
+      if (dist <= 0) return pts[0];
+      if (dist >= meta.total) return pts[pts.length - 1];
+      var cum = meta.cum;
+      var lo = 0, hi = cum.length - 1;
+      while (lo + 1 < hi) {
+        var mid = Math.floor((lo + hi) / 2);
+        if (cum[mid] <= dist) lo = mid; else hi = mid;
+      }
+      var a = pts[lo];
+      var b = pts[hi];
+      var seg = cum[hi] - cum[lo];
+      var u = seg > 0 ? (dist - cum[lo]) / seg : 0;
+      return [a[0] + (b[0]-a[0])*u, a[1] + (b[1]-a[1])*u];
+    }
+
+    var isClosed = false;
+    try { isClosed = target.subPathItems && target.subPathItems.length > 0 && target.subPathItems[0].closed; } catch (eC) {}
+
+    if (dashOn > 0 && gapOff > 0) {
+      // Dashed: build on-segments as separate open subpaths, stroke once.
+      var flat = __mcp_flattenPath(target);
+      if (flat.length < 2) {
+        return { ok: false, code: 'invalid_arguments', message: 'Path has too few points to dash' };
+      }
+      var meta = __mcp_segmentLengths(flat, isClosed);
+      var segs = [];
+      var pos = 0;
+      var guard = 0;
+      while (pos < meta.total && guard < 10000) {
+        var end = Math.min(pos + dashOn, meta.total);
+        var a = __mcp_pointAt(flat, meta, pos, isClosed);
+        var b = __mcp_pointAt(flat, meta, end, isClosed);
+        var seg = [];
+        // sample the dash into ~6 anchor points for smoother curves
+        for (var k = 0; k <= 6; k++) {
+          var dd = pos + (end - pos) * (k / 6);
+          var pt = __mcp_pointAt(flat, meta, dd, isClosed);
+          seg.push(__mcp_pt(pt[0], pt[1]));
+        }
+        segs.push(seg);
+        pos = end + gapOff;
+        guard++;
+      }
+      try {
+        for (var sIdx = 0; sIdx < segs.length; sIdx++) {
+          var sp = new SubPathInfo();
+          sp.closed = false;
+          try { sp.operation = ShapeOperation.SHAPEADD; } catch (eOp2) {}
+          sp.entireSubPath = segs[sIdx];
+          var dashPath = doc.pathItems.add('__mcp_dash_' + sIdx, [sp]);
+          dashPath.strokePath(ToolType.PENCIL, false);
+          dashPath.remove();
+        }
+      } catch (eDash) {
+        return { ok: false, code: 'extendscript_runtime_error', message: 'Dashed stroke failed: ' + (eDash.message || String(eDash)) };
+      }
+      return {
+        ok: true,
+        name: ${JSON.stringify(name)},
+        dashed: true,
+        dash: dashOn,
+        gap: gapOff,
+        color: [${red}, ${green}, ${blue}],
+        context: getContextInfo()
+      };
+    }
+
+    // Solid stroke.
+    try {
+      target.strokePath(ToolType.PENCIL, false);
+    } catch (eStroke) {
+      return { ok: false, code: 'extendscript_runtime_error', message: 'Stroke failed: ' + (eStroke.message || String(eStroke)) };
+    }
+
+    return {
+      ok: true,
+      name: ${JSON.stringify(name)},
+      dashed: false,
+      color: [${red}, ${green}, ${blue}],
+      context: getContextInfo()
+    };
+  `,
+
+  /**
+   * Fill a named closed path (interior) with an RGB color, optionally feathered.
+   * Implemented as "path -> selection -> fill" because the DOM path.fillPath()
+   * and the Action Manager fill-path descriptor both fail on PS 22.
+   */
+  fillPath: (
+    name: string,
+    red: number,
+    green: number,
+    blue: number,
+    feather: number
+  ) => `
+    ${helperFunctions}
+    ${selectionHelpers}
+    ${getContextInfo}
+
+    if (app.documents.length === 0) {
+      return { ok: false, code: 'no_document', message: 'No active document' };
+    }
+    var doc = app.activeDocument;
+
+    var target = null;
+    try {
+      for (var i = 0; i < doc.pathItems.length; i++) {
+        if (String(doc.pathItems[i].name) === ${JSON.stringify(name)}) { target = doc.pathItems[i]; break; }
+      }
+    } catch (eFind) {}
+    if (!target) {
+      return { ok: false, code: 'invalid_arguments', message: 'No path named "' + ${JSON.stringify(name)} + '"' };
+    }
+
+    try {
+      target.makeSelection();
+    } catch (eSel) {
+      return { ok: false, code: 'extendscript_runtime_error', message: 'Failed to convert path to selection: ' + (eSel.message || String(eSel)) };
+    }
+
+    if (${feather} > 0) {
+      try { doc.selection.feather(${feather}); } catch (eFthr) {}
+    }
+
+    var color = new SolidColor();
+    color.rgb.red = ${red};
+    color.rgb.green = ${green};
+    color.rgb.blue = ${blue};
+
+    try {
+      doc.selection.fill(color);
+      doc.selection.deselect();
+    } catch (eFill) {
+      return { ok: false, code: 'extendscript_runtime_error', message: 'Fill failed: ' + (eFill.message || String(eFill)) };
+    }
+
+    return {
+      ok: true,
+      name: ${JSON.stringify(name)},
+      color: [${red}, ${green}, ${blue}],
+      feather: ${feather},
+      context: getContextInfo()
+    };
+  `,
+
+  /**
+   * Delete a named path from the active document.
+   */
+  deletePath: (name: string) => `
+    ${helperFunctions}
+    ${selectionHelpers}
+    ${getContextInfo}
+
+    if (app.documents.length === 0) {
+      return { ok: false, code: 'no_document', message: 'No active document' };
+    }
+    var doc = app.activeDocument;
+    var removed = false;
+    try {
+      for (var i = doc.pathItems.length - 1; i >= 0; i--) {
+        if (String(doc.pathItems[i].name) === ${JSON.stringify(name)}) {
+          doc.pathItems[i].remove();
+          removed = true;
+        }
+      }
+    } catch (eRem) {}
+    return {
+      ok: true,
+      name: ${JSON.stringify(name)},
+      removed: removed,
+      pathCount: doc.pathItems.length,
+      context: getContextInfo()
+    };
+  `,
 };
 
 /**

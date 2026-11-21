@@ -179,6 +179,11 @@ export const TOOL_ANNOTATIONS: Record<string, PhotoshopToolAnnotations> = {
   photoshop_recipe_passport_photo: edit(false),
   photoshop_recipe_csv_to_cards: edit(false),
   photoshop_recipe_sticker_outline: edit(true),
+
+  photoshop_create_path: edit(false),
+  photoshop_stroke_path: harm(false),
+  photoshop_fill_path: harm(false),
+  photoshop_delete_path: edit(true),
 };
 
 export function withToolAnnotations(tool: Tool): Tool {

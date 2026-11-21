@@ -50,6 +50,7 @@ import { createStackTools } from '../tools/stack-tools.js';
 import { createExportTools } from '../tools/export-tools.js';
 import { createArtboardTools } from '../tools/artboard-tools.js';
 import { createSessionTools } from '../tools/session-tools.js';
+import { createPathTools } from '../tools/path-tools.js';
 import { ensureUxpBridgeServer } from '../platform/uxp-bridge-server.js';
 import { submitFeedbackFromArgs } from '../feedback/nudge.js';
 import { probePhotoshopEngine } from './ping-engine.js';
@@ -144,6 +145,7 @@ export class PhotoshopMCPServer {
     this.registerToolDefinitions(createExportTools(connection));
     this.registerToolDefinitions(createArtboardTools(connection));
     this.registerToolDefinitions(createRecipeTools(connection));
+    this.registerToolDefinitions(createPathTools(connection));
 
     this.logger.info(
       `Registered ${this.toolRegistry.count()} tools and ${this.promptRegistry.count()} prompts`
