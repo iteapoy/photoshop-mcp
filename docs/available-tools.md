@@ -1,6 +1,6 @@
 # Available Tools
 
-**128 tools total** — 111 atomic `photoshop_*` tools plus 17 recipe `photoshop_recipe_*` workflows (single undo step each).
+**131 tools total** — 114 atomic `photoshop_*` tools plus 17 recipe `photoshop_recipe_*` workflows (single undo step each).
 
 Reference for all atomic `photoshop_*` MCP tools exposed by this server (parameters, examples, and return shapes).
 
@@ -1246,6 +1246,16 @@ Exposure adjustment layer. **Parameters:** `exposure` (stops, default 0.5), `off
 
 #### `photoshop_apply_photo_filter`
 Photo Filter adjustment layer (warming/cooling/tint). **Parameters:** `red`, `green`, `blue` (default 236/138/0 ≈ warming 85), `density` (0-100, default 25), `preserve_luminosity` (default true)
+
+#### Tonal adjustment layers
+
+These tools add editable adjustment layers in the active document.
+
+| Tool | Parameters |
+| --- | --- |
+| `photoshop_create_black_and_white_adjustment_layer` | Uses Photoshop's default Black & White settings. |
+| `photoshop_create_posterize_adjustment_layer` | `levels` (integer 2–255, default 4). |
+| `photoshop_create_threshold_adjustment_layer` | `level` (integer 1–255, default 128). |
 
 #### `photoshop_apply_gradient_map`
 Gradient Map adjustment layer (black→white). **Parameters:** `reverse` (boolean, default false)

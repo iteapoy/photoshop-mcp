@@ -4857,6 +4857,29 @@ export const ExtendScriptSnippets = {
     };
   `,
 
+  createTonalAdjustmentLayer: (
+    kind: 'blackAndWhite' | 'posterization' | 'thresholdClassEvent',
+    level?: number
+  ) => `
+    ${helperFunctions}
+    if (app.documents.length === 0) {
+      throw new Error('No active document');
+    }
+
+    var desc = new ActionDescriptor();
+    var ref = new ActionReference();
+    ref.putClass(sTID('adjustmentLayer'));
+    desc.putReference(sTID('null'), ref);
+    var using = new ActionDescriptor();
+    var settings = new ActionDescriptor();
+    ${level === undefined ? '' : `settings.putInteger(cTID('Lvl '), ${level});`}
+    using.putObject(sTID('type'), sTID('${kind}'), settings);
+    desc.putObject(sTID('using'), sTID('adjustmentLayer'), using);
+    executeAction(sTID('make'), desc, DialogModes.NO);
+
+    return { created: true, layer_name: app.activeDocument.activeLayer.name };
+  `,
+
   /**
    * Gradient Map adjustment layer (black→white custom gradient by default).
    */

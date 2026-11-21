@@ -17,6 +17,42 @@ export function createColorAdjustmentTools(connection: PhotoshopConnection): Too
   return [
     {
       tool: {
+        name: 'photoshop_create_black_and_white_adjustment_layer',
+        description: 'Create an editable Black & White adjustment layer in the active document.',
+        inputSchema: { type: 'object', properties: {} },
+      },
+      handler: async () => runAdjustmentSnippet(
+        connection,
+        ExtendScriptSnippets.createTonalAdjustmentLayer('blackAndWhite'),
+        'Black & White adjustment layer created'
+      ),
+    },
+    {
+      tool: {
+        name: 'photoshop_create_posterize_adjustment_layer',
+        description: 'Create an editable Posterize adjustment layer in the active document.',
+        inputSchema: { type: 'object', properties: { levels: { type: 'integer', minimum: 2, maximum: 255, default: 4 } } },
+      },
+      handler: async (args) => runAdjustmentSnippet(
+        connection,
+        ExtendScriptSnippets.createTonalAdjustmentLayer('posterization', Math.round(clampNumber(args.levels, 2, 255, 4))),
+        'Posterize adjustment layer created'
+      ),
+    },
+    {
+      tool: {
+        name: 'photoshop_create_threshold_adjustment_layer',
+        description: 'Create an editable Threshold adjustment layer in the active document.',
+        inputSchema: { type: 'object', properties: { level: { type: 'integer', minimum: 1, maximum: 255, default: 128 } } },
+      },
+      handler: async (args) => runAdjustmentSnippet(
+        connection,
+        ExtendScriptSnippets.createTonalAdjustmentLayer('thresholdClassEvent', Math.round(clampNumber(args.level, 1, 255, 128))),
+        'Threshold adjustment layer created'
+      ),
+    },
+    {
+      tool: {
         name: 'photoshop_apply_lut',
         description:
           'Apply a Color Lookup (3D LUT) adjustment layer for cinematic color grading. Accepts a built-in LUT name (e.g. "Crisp_Warm.3dl", "Kodak 5218 Fuji 3510.3dl", "Moonlight.3dl") or an absolute path to a .cube/.3dl/.look file.\n\n' +

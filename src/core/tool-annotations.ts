@@ -146,6 +146,9 @@ export const TOOL_ANNOTATIONS: Record<string, PhotoshopToolAnnotations> = {
   photoshop_adjust_vibrance: edit(false),
   photoshop_adjust_exposure: edit(false),
   photoshop_apply_photo_filter: edit(false),
+  photoshop_create_black_and_white_adjustment_layer: edit(false),
+  photoshop_create_posterize_adjustment_layer: edit(false),
+  photoshop_create_threshold_adjustment_layer: edit(false),
   photoshop_apply_gradient_map: edit(false),
 
   photoshop_list_datasets: read,
