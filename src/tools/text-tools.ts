@@ -190,6 +190,10 @@ export function createTextTools(connection: PhotoshopConnection): ToolDefinition
         inputSchema: {
           type: 'object',
           properties: {
+            kerning_mode: {
+              type: 'string', enum: ['manual', 'metrics', 'optical'],
+              description: 'Kerning mode. New text defaults to manual with zero pair adjustment; tracking is a separate spacing setting.',
+            },
             tracking: {
               type: 'number',
               description: 'Character spacing in 1/1000 em (−1000 to 10000)',

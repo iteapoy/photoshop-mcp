@@ -31,7 +31,9 @@ export type PhotoshopErrorCode =
   | 'photoshop_unreachable'
   | 'automation_permission_denied'
   | 'photoshop_app_not_resolved'
-  | 'unknown';
+  | 'unknown'
+  | 'unsupported_api'
+  | 'document_state';
 
 export interface PhotoshopErrorEnvelope {
   ok: false;
@@ -39,6 +41,10 @@ export interface PhotoshopErrorEnvelope {
   message: string;
   suggested_next_tool?: string;
   suggested_args?: Record<string, unknown>;
+  native_code?: number;
+  line?: number;
+  operation?: string;
+  phase?: 'validation' | 'target_resolution' | 'execution' | 'timeout' | 'unknown';
 }
 
 const ERROR_PATTERNS: Array<{
@@ -46,6 +52,13 @@ const ERROR_PATTERNS: Array<{
   code: PhotoshopErrorCode;
   suggested_next_tool?: string;
 }> = [
+  { pattern: /非法参数|应为枚举值|invalid (?:argument|parameter)|number: (?:1200|1220|1224)\b/i,
+    code: 'invalid_arguments' },
+  { pattern: /不是函数|is not a function|undefined is not an object|unsupported api/i,
+    code: 'unsupported_api' },
+  { pattern: /当前不可用|currently (?:not available|unavailable)|number: -25920\b/i,
+    code: 'document_state', suggested_next_tool: 'photoshop_get_state' },
+  { pattern: /number: 1302\b/i, code: 'extendscript_runtime_error' },
   {
     pattern: /document_not_found/i,
     code: 'document_not_found',
@@ -328,9 +341,31 @@ function extractErrorCodeFromResult(result: CallToolResult): string {
   return 'unknown';
 }
 
+export function addErrorContext(toolName: string, result: CallToolResult): CallToolResult {
+  if (!result.isError) return result;
+  return {
+    ...result,
+    content: result.content.map((item) => {
+      if (item.type !== 'text') return item;
+      try {
+        const envelope = JSON.parse(item.text) as PhotoshopErrorEnvelope;
+        if (envelope.ok !== false) return item;
+        const marker = envelope.message.match(/phase: (target_resolution|execution)/);
+        envelope.phase ??= marker ? marker[1] as 'target_resolution' | 'execution'
+          : envelope.code === 'extendscript_timeout' ? 'timeout'
+          : ['layer_not_found', 'document_not_found', 'no_active_document', 'no_active_layer'].includes(envelope.code)
+            ? 'target_resolution'
+            : envelope.code === 'invalid_arguments' ? 'validation' : 'unknown';
+        envelope.operation ??= toolName;
+        return { ...item, text: JSON.stringify(envelope) };
+      } catch { return item; }
+    }),
+  };
+}
+
 async function finishToolError(toolName: string, result: CallToolResult): Promise<CallToolResult> {
   const diagnosed = await applyScratchDiskDiagnosis(result);
-  return refineTimeoutToolResult(toolName, diagnosed);
+  return addErrorContext(toolName, refineTimeoutToolResult(toolName, diagnosed));
 }
 
 /**

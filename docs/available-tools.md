@@ -1,6 +1,6 @@
 # Available Tools
 
-**136 tools total** — 119 atomic `photoshop_*` tools plus 17 recipe `photoshop_recipe_*` workflows (single undo step each).
+**137 tools total** — 120 atomic `photoshop_*` tools plus 17 recipe `photoshop_recipe_*` workflows (single undo step each).
 
 Reference for all atomic `photoshop_*` MCP tools exposed by this server (parameters, examples, and return shapes).
 
@@ -1372,3 +1372,51 @@ Legacy tools remain callable for compatibility. The HTTP grouped surface shows
 `adjust/create_adjustment_layer` in place of the nine individual actions.
 
 Example: `{ "type": "threshold", "params": { "level": 160 } }`.
+
+#### `photoshop_create_shape_layer`
+
+Create an editable vector fill layer using `type` (`rectangle`,
+`rounded_rectangle`, `ellipse`, or `line`) and pixel coordinates
+`left`, `top`, `right`, `bottom`. For a line these are endpoints.
+Optional parameters are `name`, `red`, `green`, `blue` (0–255, default 0),
+`opacity` (0–100, default 100), `radius` (rounded rectangle, default 10,
+clamped to half the shorter side), and `line_width` (positive, default 1).
+A line is filled rectangular vector geometry with square ends. Shapes are filled
+and do not configure native stroke or dash styles. Use `document_id` to pin
+the destination document. The result includes the new layer ID and name.
+The HTTP group action is `path/create_shape_layer`.
+
+Native shape stroke options on `photoshop_create_shape_layer`:
+`fill_enabled` (default true), `stroke_width` (pixels, default 0 disables stroke),
+`stroke_red/green/blue` (0–255), `stroke_opacity` (0–100),
+`stroke_alignment` (`inside`, `center`, `outside`),
+`dash_pattern` (positive alternating dash/gap values in pairs, at most 32 entries),
+and `dash_offset`. Dash values and offset are multiples of stroke width.
+An empty pattern produces a solid stroke. For example, width 4 and pattern
+[4, 2] produces 16 px dashes and 8 px gaps. Set `fill_enabled:false` for an
+outline-only rectangle or ellipse. For line shapes, stroke outlines the narrow
+rectangle used for line geometry.
+
+### Explicit layer targets and reported ranges
+
+Tools with a `layer_name` parameter, plus pixel fills and path strokes/fills,
+accept optional `layer_id`. IDs come from `photoshop_get_layers`, which returns
+`id`, `kind`, `parent_id`, and pixel `bounds` for each layer. Pass
+`document_id` together with `layer_id` to pin both targets. IDs must be positive
+integers. Combining `layer_id` with `layer_name` or `layer_index` is rejected.
+Name-based calls remain supported. Target activation and the operation run in
+the same script, and missing IDs fail before the operation.
+
+Selection results expose `selection_bounds` alongside legacy `bounds`.
+Solid fills return `requested_bounds` (selection or whole canvas),
+`selection_bounds` (null when absent), and `target_bounds` (the target layer's
+content after filling). Legacy `affected_bounds` remains an alias for the
+selection/canvas region, labeled `bounds_kind: "selection_or_canvas"`.
+Path strokes report `target_bounds` with `bounds_kind: "layer_content_after"`.
+These ranges do not measure a before/after pixel difference.
+
+Tool failures include `operation` and `phase` where available. Phases are
+`validation`, `target_resolution`, `execution`, `timeout`, and `unknown`.
+An execution-phase parameter error originates in Photoshop, while a
+validation-phase error was rejected before execution. Timeouts leave the
+operation's completion uncertain.

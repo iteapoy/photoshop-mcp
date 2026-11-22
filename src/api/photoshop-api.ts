@@ -1,3 +1,4 @@
+import { getTargetLayerId, layerGuardScript } from '../core/layer-target.js';
 import { Logger } from '../utils/logger.js';
 import { PhotoshopConnection } from '../platform/connection.js';
 import { documentGuardScript, getTargetDocumentId } from '../core/document-target.js';
@@ -170,9 +171,12 @@ class ExtendScriptPhotoshopAPI implements PhotoshopAPI {
     // regardless of the user's Photoshop preferences. The user's original
     // preferences are restored in the finally block.
     const targetId = getTargetDocumentId();
+    const layerId = getTargetLayerId();
+    const layerGuard = layerId === undefined ? '' : layerGuardScript(layerId);
     const documentGuard = typeof targetId === 'number' ? documentGuardScript(targetId) : '';
     return `
 (function() {
+  var __mcp_phase = 'target_resolution';
   var __originalRulerUnits = null;
   var __originalTypeUnits = null;
   var __origDialogs = null;
@@ -204,6 +208,8 @@ class ExtendScriptPhotoshopAPI implements PhotoshopAPI {
     try { app.preferences.typeUnits = TypeUnits.POINTS; } catch (e) {}
 
     ${documentGuard}
+    ${layerGuard}
+    __mcp_phase = 'execution';
 
     var result = (function() {
       ${script}
@@ -215,11 +221,16 @@ class ExtendScriptPhotoshopAPI implements PhotoshopAPI {
   } catch (error) {
     var errorMessage = '';
     var errorNumber = '';
+    errorMessage = '';
     try { errorMessage = error.message; } catch (e) {}
     try { errorNumber = String(error.number); } catch (e2) {}
     if (!errorMessage) {
       try { errorMessage = String(error); } catch (e3) { errorMessage = 'unknown'; }
     }
+    try {
+      if (error.line) errorMessage += ' (line: ' + error.line + ')';
+    } catch (eLine) {}
+    errorMessage += ' (phase: ' + __mcp_phase + ')';
     if (errorNumber && errorNumber !== 'undefined' && errorNumber !== 'NaN') {
       return 'ERROR: ' + errorMessage + ' (number: ' + errorNumber + ')';
     }

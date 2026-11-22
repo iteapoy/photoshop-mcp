@@ -15,6 +15,7 @@ export type TextAlignment = (typeof TEXT_ALIGNMENTS)[number];
 export type TextKind = 'point' | 'paragraph';
 
 export interface TextStyleOptions {
+  kerning_mode?: 'manual' | 'metrics' | 'optical';
   tracking?: number;
   leading?: number;
   auto_leading?: boolean;
@@ -95,6 +96,12 @@ export function parseTextStyleArgs(
 ): { style: TextStyleOptions; error?: PhotoshopErrorEnvelope } {
   const style: TextStyleOptions = {};
 
+  if (args.kerning_mode !== undefined) {
+    if (!['manual', 'metrics', 'optical'].includes(String(args.kerning_mode))) {
+      return { style, error: invalid('kerning_mode must be manual, metrics, or optical') };
+    }
+    style.kerning_mode = args.kerning_mode as TextStyleOptions['kerning_mode'];
+  }
   const tracking = optionalNumber(args, 'tracking', -1000, 10000, true);
   if (tracking.error) return { style, error: tracking.error };
   if (tracking.value !== undefined) style.tracking = tracking.value;
@@ -159,7 +166,7 @@ export function parseTextStyleArgs(
     return {
       style,
       error: invalid(
-        'Provide at least one of tracking, leading, auto_leading, kind, box_width, box_height, alignment, fontName, fontSize, or RGB color'
+        'Provide at least one of kerning_mode, tracking, leading, auto_leading, kind, box_width, box_height, alignment, fontName, fontSize, or RGB color'
       ),
     };
   }
@@ -169,6 +176,7 @@ export function parseTextStyleArgs(
 
 export function hasTextStyle(style: TextStyleOptions): boolean {
   return (
+    style.kerning_mode !== undefined ||
     style.tracking !== undefined ||
     style.leading !== undefined ||
     style.auto_leading !== undefined ||
@@ -184,6 +192,7 @@ export function hasTextStyle(style: TextStyleOptions): boolean {
 
 export function emitTextStyleLiteral(style: TextStyleOptions): string {
   const parts: string[] = [];
+  if (style.kerning_mode !== undefined) parts.push('kerning_mode:' + jsStringLiteral(style.kerning_mode));
   if (style.tracking !== undefined) parts.push(`tracking:${style.tracking}`);
   if (style.leading !== undefined) parts.push(`leading:${style.leading}`);
   if (style.auto_leading !== undefined) parts.push(`auto_leading:${style.auto_leading ? 'true' : 'false'}`);

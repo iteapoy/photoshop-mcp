@@ -51,7 +51,7 @@ import {
   resolveAction,
   schemaOf,
   actionOf,
-  paramSignature,
+  actionSchemaDetails,
   GROUPS_FILE,
 } from './tool-groups.mjs';
 
@@ -293,30 +293,28 @@ function buildServer() {
 
     if (name === 'photoshop_schema') {
       const wanted = toolArgs?.action ?? '';
+      if (wanted === 'list') {
+        return { content: [{ type: 'text', text: JSON.stringify(
+          Object.fromEntries([...surface.index].map(([group, actions]) =>
+            [group, [...actions.keys()]]))
+        ) }] };
+      }
       const tool = resolveAction(toolCache, wanted);
       if (!tool) {
         return textError(
           `Unknown action "${wanted}". Use "<group>/<action>" (e.g. "layer/get_layers") or the raw tool name.`
         );
       }
-      return {
-        content: [
-          {
+      try {
+        return {
+          content: [{
             type: 'text',
-            text: JSON.stringify(
-              {
-                action: actionOf(tool.name),
-                tool: tool.name,
-                signature: paramSignature(tool),
-                description: tool.description,
-                schema: schemaOf(tool),
-              },
-              null,
-              2
-            ),
-          },
-        ],
-      };
+            text: JSON.stringify(actionSchemaDetails(tool, toolArgs?.type)),
+          }],
+        };
+      } catch (error) {
+        return textError(error.message);
+      }
     }
 
     if (name === 'photoshop_call') {
@@ -331,7 +329,13 @@ function buildServer() {
       const prepared = prepareArgs(target, params);
       if (!prepared.ok) {
         logRejected(name, target.name, actionOf(target.name), 'call', prepared.message);
-        return textError(prepared.message);
+        return {
+        isError: true,
+        content: [{ type: 'text', text: JSON.stringify({
+          ok: false, code: 'invalid_arguments', message: prepared.message,
+          phase: 'validation', operation: tool.name,
+        }) }],
+      };
       }
       return forwardTool(target.name, prepared.args, _meta, extra?.signal, {
         requested: name,
@@ -366,7 +370,13 @@ function buildServer() {
     const prepared = prepareArgs(tool, params);
     if (!prepared.ok) {
       logRejected(name, tool.name, action, 'grouped', prepared.message);
-      return textError(prepared.message);
+      return {
+        isError: true,
+        content: [{ type: 'text', text: JSON.stringify({
+          ok: false, code: 'invalid_arguments', message: prepared.message,
+          phase: 'validation', operation: tool.name,
+        }) }],
+      };
     }
     return forwardTool(tool.name, prepared.args, _meta, extra?.signal, {
       requested: name,

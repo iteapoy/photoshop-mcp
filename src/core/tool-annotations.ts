@@ -181,6 +181,7 @@ export const TOOL_ANNOTATIONS: Record<string, PhotoshopToolAnnotations> = {
   photoshop_recipe_csv_to_cards: edit(false),
   photoshop_recipe_sticker_outline: edit(true),
 
+  photoshop_create_shape_layer: edit(false),
   photoshop_create_path: edit(false),
   photoshop_stroke_path: harm(false),
   photoshop_fill_path: harm(false),

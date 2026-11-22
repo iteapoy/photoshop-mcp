@@ -96,6 +96,10 @@ export function createLayerTools(connection: PhotoshopConnection): ToolDefinitio
               description:
                 'Optional font display or PostScript name (resolved via app.fonts; see photoshop_list_fonts)',
             },
+            kerning_mode: {
+              type: 'string', enum: ['manual', 'metrics', 'optical'],
+              description: 'Kerning mode. New text defaults to manual with zero pair adjustment; tracking is a separate spacing setting.',
+            },
             tracking: {
               type: 'number',
               description: 'Character spacing in 1/1000 em (−1000 to 10000). Photoshop tracking.',
@@ -173,6 +177,10 @@ export function createLayerTools(connection: PhotoshopConnection): ToolDefinitio
         inputSchema: {
           type: 'object',
           properties: {
+            require_selection: {
+              type: 'boolean', default: false,
+              description: 'Reject an empty selection instead of filling the entire canvas.',
+            },
             layer_name: {
               type: 'string',
               minLength: 1,
@@ -417,7 +425,7 @@ async function fillLayer(
 
     const script = ExtendScriptSnippets.fillLayer(
       colorByte(red, 'red'), colorByte(green, 'green'), colorByte(blue, 'blue'),
-      fillTargetName(args)
+      fillTargetName(args), args.require_selection === true
     );
     const raw = await api.executeScript(script);
     return atomicSuccess('Layer filled', parseSnippetResult(raw) ?? { result: raw });

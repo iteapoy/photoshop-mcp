@@ -2,6 +2,7 @@ import { ToolDefinition, ToolResult } from '../core/tool-registry.js';
 import { PhotoshopConnection } from '../platform/connection.js';
 import { PhotoshopAPIFactory } from '../api/photoshop-api.js';
 import { ExtendScriptSnippets } from '../api/extendscript.js';
+import { buildEnvelopeFromError } from '../errors/envelope.js';
 import { resolveScriptTimeoutMs } from '../platform/script-timeout.js';
 
 export function createActionTools(connection: PhotoshopConnection): ToolDefinition[] {
@@ -133,14 +134,18 @@ async function executeCustomScript(
       ],
     };
   } catch (error) {
-    return {
-      content: [
-        {
-          type: 'text' as const,
-          text: `Error executing custom script: ${error instanceof Error ? error.message : String(error)}`,
-        },
-      ],
-      isError: true,
-    };
+    const result = buildEnvelopeFromError(error);
+    const message = error instanceof Error ? error.message : String(error);
+    const nativeCode = message.match(/number: (-?\d+)/);
+    const line = message.match(/line: (\d+)/);
+    const text = result.content.find((item) => item.type === 'text');
+    if (text && text.type === 'text') {
+      const envelope = JSON.parse(text.text);
+      envelope.operation = 'execute_script';
+      if (nativeCode) envelope.native_code = Number(nativeCode[1]);
+      if (line) envelope.line = Number(line[1]);
+      text.text = JSON.stringify(envelope);
+    }
+    return result;
   }
 }

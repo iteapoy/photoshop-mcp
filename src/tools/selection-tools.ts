@@ -40,7 +40,11 @@ function parseSelectionBounds(
   parsed: Record<string, unknown>
 ): Record<string, unknown> | undefined {
   const details: Record<string, unknown> = {};
-  if (parsed.bounds !== undefined) details.bounds = parsed.bounds;
+  if (parsed.bounds !== undefined) {
+    details.bounds = parsed.bounds;
+    details.selection_bounds = parsed.bounds;
+    details.bounds_kind = 'selection';
+  }
   if (parsed.pixels !== undefined) details.pixels = parsed.pixels;
   if (parsed.operation !== undefined) details.operation = parsed.operation;
   if (parsed.shape !== undefined) details.shape = parsed.shape;
@@ -79,6 +83,8 @@ export function createSelectionTools(connection: PhotoshopConnection): ToolDefin
         inputSchema: {
           type: 'object',
           properties: {
+            feather: { type: 'number', minimum: 0, maximum: 250, default: 0,
+              description: 'Feather radius in pixels, applied in the same operation.' },
             left: {
               type: 'number',
               description: 'Left edge of bounding box in pixels',
@@ -422,6 +428,11 @@ async function selectEllipse(
   const right = args.right as number;
   const bottom = args.bottom as number;
 
+  const feather = args.feather === undefined ? 0 : args.feather;
+  if (typeof feather !== 'number' || !Number.isFinite(feather) || feather < 0 || feather > 250 ||
+      ![left, top, right, bottom].every(Number.isFinite)) {
+    return atomicFailureFromError(new Error('Invalid ellipse bounds or feather (0-250)'));
+  }
   if (right <= left || bottom <= top) {
     return atomicFailure({
       ok: false,
@@ -432,7 +443,7 @@ async function selectEllipse(
   }
 
   try {
-    const raw = await runSnippet(connection, ExtendScriptSnippets.selectEllipse(left, top, right, bottom));
+    const raw = await runSnippet(connection, ExtendScriptSnippets.selectEllipse(left, top, right, bottom, feather));
     const parsed = parseSnippetResult(raw);
     if (!parsed) {
       return atomicFailureFromError(new Error(`Snippet returned unparseable payload: ${String(raw)}`));

@@ -198,6 +198,7 @@ export function groupOf(toolName, config = loadGroupConfig()) {
   ) {
     return 'adjust';
   }
+  if (s === 'create_shape_layer') return 'path';
   if (s.endsWith('_path') || s === 'create_path') return 'path';
   if (s.includes('fill') || s.includes('gradient')) return 'fill';
   if (
@@ -333,7 +334,8 @@ export function buildGroupedTools(tools, config = loadGroupConfig()) {
   const schemaTool = {
     name: 'photoshop_schema',
     description:
-      'Return the full JSON Schema of one action, e.g. action "layer/get_layers". ' +
+      'Use action list to list all groups and actions. Otherwise return a compact schema and usage constraints. ' +
+      'For adjust/create_adjustment_layer, pass type to retrieve only that adjustment type. ' +
       'Query this before calling an action to discover its accepted parameters, required fields, and defaults. Reuse the schema for subsequent calls to the same action.',
     inputSchema: {
       type: 'object',
@@ -341,6 +343,10 @@ export function buildGroupedTools(tools, config = loadGroupConfig()) {
         action: {
           type: 'string',
           description: 'Group/action (e.g. "layer/get_layers") or raw tool name (e.g. "photoshop_get_layers").',
+        },
+        type: {
+          type: 'string',
+          description: 'Optional adjustment layer type, e.g. threshold, exposure, or curves.',
         },
       },
       required: ['action'],
@@ -467,6 +473,19 @@ export function prepareArgs(tool, rawArgs) {
   const props = sch.properties ?? {};
   const required = new Set(sch.required ?? []);
   const args = unwrapNestedArgs({ ...(rawArgs ?? {}) }, props);
+  const aliases = {
+    file_path: ['photoshop_export_as', 'photoshop_save_document'].includes(tool.name) ? 'path' : 'filePath',
+    max_size: 'max_dimension_px',
+  };
+  for (const [alias, canonical] of Object.entries(aliases)) {
+    if (!(alias in props) && canonical in props && args[alias] !== undefined) {
+      if (args[canonical] !== undefined && args[canonical] !== args[alias]) {
+        return { ok: false, message: 'Conflicting parameters: ' + alias + ' and ' + canonical };
+      }
+      args[canonical] = args[alias];
+      delete args[alias];
+    }
+  }
   const errors = [];
 
   if (required.has('document_id') && args.document_id === undefined) {
@@ -575,4 +594,39 @@ export function resolveAction(tools, action) {
     if (hit) return hit;
   }
   return null;
+}
+
+
+// Preserve the callable schema while removing duplicated prose from discovery.
+export function actionSchemaDetails(tool, adjustmentType) {
+  const original = schemaOf(tool);
+  let schema = original;
+  if (adjustmentType !== undefined) {
+    if (tool.name !== 'photoshop_create_adjustment_layer') {
+      throw new Error('type is only supported for create_adjustment_layer');
+    }
+    const variant = original.oneOf?.find(
+      (entry) => entry.properties?.type?.const === adjustmentType
+    );
+    if (!variant) {
+      throw new Error('Unknown adjustment type. Available: ' +
+        (original.properties?.type?.enum ?? []).join(', '));
+    }
+    schema = {
+      ...original,
+      properties: { ...original.properties, ...variant.properties },
+      required: [...new Set([...(original.required ?? []), ...(variant.required ?? [])])],
+    };
+    delete schema.oneOf;
+  }
+  const description = tool.description ?? '';
+  const constraints = description.split(/\n+/).filter(
+    (line) => /preconditions:|side effects:|important:|must |cannot |rasteriz/i.test(line)
+  );
+  return {
+    action: actionOf(tool.name),
+    ...(adjustmentType === undefined ? {} : { type: adjustmentType }),
+    ...(constraints.length ? { constraints: constraints.join('\n') } : {}),
+    schema,
+  };
 }

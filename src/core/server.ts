@@ -1,3 +1,5 @@
+import { withOptionalLayerId, wrapLayerIdHandler } from './layer-target.js';
+import { createShapeTools } from '../tools/shape-tools.js';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import {
@@ -94,10 +96,10 @@ export class PhotoshopMCPServer {
   }
 
   private registerToolDefinition(definition: ToolDefinition): void {
-    const tool = withToolAnnotations(withOptionalDocumentId(definition.tool));
+    const tool = withToolAnnotations(withOptionalDocumentId(withOptionalLayerId(definition.tool)));
     this.toolRegistry.register(tool.name, {
       tool,
-      handler: wrapToolHandler(tool.name, wrapDocumentIdHandler(tool.name, definition.handler)),
+      handler: wrapToolHandler(tool.name, wrapDocumentIdHandler(tool.name, wrapLayerIdHandler(definition.tool, definition.handler))),
     });
   }
 
@@ -146,6 +148,7 @@ export class PhotoshopMCPServer {
     this.registerToolDefinitions(createArtboardTools(connection));
     this.registerToolDefinitions(createRecipeTools(connection));
     this.registerToolDefinitions(createPathTools(connection));
+    this.registerToolDefinitions(createShapeTools(connection));
 
     this.logger.info(
       `Registered ${this.toolRegistry.count()} tools and ${this.promptRegistry.count()} prompts`

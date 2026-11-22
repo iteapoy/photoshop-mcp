@@ -158,3 +158,46 @@ describe('extractCall', () => {
     expect(extractCall({ params: { a: 1 } })).toEqual({ action: '', params: { a: 1 } });
   });
 });
+
+describe('compact adjustment schema discovery', () => {
+  it('narrows parameters and required fields without mutating the original schema', async () => {
+    const { actionSchemaDetails } = await import('../scripts/tool-groups.mjs');
+    const { createColorAdjustmentTools } = await import('../src/tools/color-adjustment-tools.js');
+    const tool = createColorAdjustmentTools({} as never)[0].tool;
+    const original = JSON.stringify(tool);
+    const threshold = actionSchemaDetails(tool, 'threshold').schema;
+    expect(threshold.oneOf).toBeUndefined();
+    expect(threshold.properties.type).toEqual({ const: 'threshold' });
+    expect(Object.keys(threshold.properties.params.properties)).toEqual(['level']);
+    expect(threshold.properties.params.properties.level.maximum).toBe(255);
+    const lookup = actionSchemaDetails(tool, 'color_lookup').schema;
+    expect(lookup.required).toContain('params');
+    expect(lookup.properties.params.required).toContain('lut');
+    expect(JSON.stringify(tool)).toBe(original);
+    expect(() => actionSchemaDetails(tool, 'unknown')).toThrow('Unknown adjustment type');
+  });
+
+  it('keeps constraints and removes duplicate descriptions and signatures', async () => {
+    const { actionSchemaDetails } = await import('../scripts/tool-groups.mjs');
+    const tool = {
+      name: 'photoshop_fill_layer',
+      description: 'Fill pixels.\nUse when: filling.\nPreconditions: unlocked layer. Side effects: overwrites pixels.',
+      inputSchema: { type: 'object', properties: {} },
+    };
+    const result = actionSchemaDetails(tool);
+    expect(result.constraints).toContain('overwrites pixels');
+    expect(result).not.toHaveProperty('signature');
+    expect(result).not.toHaveProperty('description');
+    expect(() => actionSchemaDetails(tool, 'threshold')).toThrow('only supported');
+  });
+});
+
+describe('parameter aliases', () => {
+  it('normalizes legacy file paths and rejects conflicting values', () => {
+    const tool = { name: 'photoshop_open_image', inputSchema: {
+      type: 'object', properties: { filePath: { type: 'string' } }, required: ['filePath'],
+    } };
+    expect(prepareArgs(tool, { file_path: '/tmp/a.png' }).ok).toBe(true);
+    expect(prepareArgs(tool, { file_path: '/tmp/a.png', filePath: '/tmp/b.png' }).ok).toBe(false);
+  });
+});

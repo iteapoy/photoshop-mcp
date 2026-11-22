@@ -116,6 +116,10 @@ function __mcp_siblingIndex(container, target) {
 }
 
 function __mcp_resolveLayer(doc, name, index) {
+  if (typeof __mcp_targetLayerId !== 'undefined') {
+    if (doc.activeLayer && doc.activeLayer.id === __mcp_targetLayerId) return doc.activeLayer;
+    throw new Error('layer_not_found: target layer changed during execution');
+  }
   if (name) {
     var found = __mcp_findLayer(doc, name);
     if (!found) throw new Error('layer_not_found: no layer named "' + name + '"');
@@ -599,6 +603,7 @@ function __mcp_readTextStyle(t) {
   try { out.contents = String(t.contents); } catch (eContents) {}
   try { out.font = t.font; } catch (eFont) {}
   try { out.size = __mcp_unitAs(t.size, 'pt'); } catch (eSize) {}
+  try { out.kerning_mode = String(t.autoKerning).replace('AutoKernType.', '').toLowerCase(); } catch (eKern) {}
   try { out.tracking = t.tracking; } catch (eTrack) {}
   try {
     var useAuto = false;
@@ -642,6 +647,11 @@ function __mcp_applyTextStyle(t, opts) {
   }
   if (opts.size !== undefined && opts.size !== null) {
     t.size = opts.size;
+  }
+  if (opts.kerning_mode !== undefined) {
+    var modes = { manual: AutoKernType.MANUAL, metrics: AutoKernType.METRICS, optical: AutoKernType.OPTICAL };
+    if (!modes[opts.kerning_mode]) throw new Error('Invalid kerning_mode');
+    t.autoKerning = modes[opts.kerning_mode];
   }
   if (opts.tracking !== undefined && opts.tracking !== null) {
     t.tracking = opts.tracking;
@@ -781,6 +791,7 @@ function __mcp_setTextRanges(ranges) {
 
   t = app.activeDocument.activeLayer.textItem;
   __mcp_applyTextStyle(t, {
+    kerning_mode: snap.kerning_mode,
     tracking: snap.tracking,
     leading: snap.leading,
     auto_leading: snap.auto_leading,
@@ -871,8 +882,10 @@ function getContextInfo() {
         if (doc.activeLayer) {
           var layer = doc.activeLayer;
           context.activeLayer = {
+            id: layer.id,
+            parent_id: container.typename === 'LayerSet' ? container.id : null,
             name: layer.name,
-            kind: String(layer.kind),
+            kind: layer.typename === 'LayerSet' ? 'group' : String(layer.kind),
             opacity: layer.opacity,
             blendMode: String(layer.blendMode),
             visible: layer.visible,
@@ -1360,6 +1373,8 @@ export const ExtendScriptSnippets = {
     var doc = app.activeDocument;
     var textLayer = doc.artLayers.add();
     textLayer.kind = LayerKind.TEXT;
+    textLayer.textItem.autoKerning = AutoKernType.MANUAL;
+    textLayer.textItem.tracking = 0;
     textLayer.textItem.contents = "${jsString(text)}";
     textLayer.textItem.position = [${x}, ${y}];
     textLayer.textItem.size = ${fontSize};
@@ -1753,11 +1768,17 @@ export const ExtendScriptSnippets = {
    * selection, otherwise select the whole canvas, fill, then deselect.
    * Background / fully-locked layers cannot be filled, so fail clearly.
    */
-  fillLayer: (red: number, green: number, blue: number, layerName?: string) => `
+  fillLayer: (red: number, green: number, blue: number, layerName?: string, requireSelection = false) => `
     if (app.documents.length === 0) {
       throw new Error('No active document');
     }
     var doc = app.activeDocument;
+    if (${requireSelection}) {
+      var selectionExists = false;
+      try { selectionExists = doc.selection.bounds != null; } catch (eSelection) {}
+      if (!selectionExists) throw new Error('Selection required: no active selection; fill cancelled');
+    }
+
 
     ${layerName === undefined ? '' : `
     var targetName = ${JSON.stringify(layerName)};
@@ -1804,6 +1825,13 @@ export const ExtendScriptSnippets = {
       hadSelection = false;
     }
 
+    if (!hadSelection && ${requireSelection}) {
+      throw new Error('Selection required: no active selection; fill cancelled');
+    }
+    var affectedBounds = hadSelection
+      ? [doc.selection.bounds[0].as('px'), doc.selection.bounds[1].as('px'),
+         doc.selection.bounds[2].as('px'), doc.selection.bounds[3].as('px')]
+      : [0, 0, doc.width.as('px'), doc.height.as('px')];
     if (!hadSelection) {
       doc.selection.selectAll();
     }
@@ -1814,6 +1842,12 @@ export const ExtendScriptSnippets = {
 
     return {
       filled: true,
+      affected_bounds: affectedBounds,
+      bounds_kind: 'selection_or_canvas',
+      selection_bounds: hadSelection ? affectedBounds : null,
+      requested_bounds: affectedBounds,
+      target_bounds: [layer.bounds[0].as('px'), layer.bounds[1].as('px'), layer.bounds[2].as('px'), layer.bounds[3].as('px')],
+      had_selection: hadSelection,
       rasterized: rasterized,
       layerName: layer.name,
       layer_id: layer.id,
@@ -2012,6 +2046,11 @@ export const ExtendScriptSnippets = {
               entry.is_artboard = __mcp_isArtboardId(layer.id);
             }
           } catch (eAb) {}
+          entry.bounds = null;
+          try {
+            var b = layer.bounds;
+            entry.bounds = [b[0].as('px'), b[1].as('px'), b[2].as('px'), b[3].as('px')];
+          } catch (eBounds) {}
           layers.push(entry);
         } catch (e) {
           var layerName = 'layer_' + layers.length;
@@ -3101,7 +3140,7 @@ export const ExtendScriptSnippets = {
    * @see https://stackoverflow.com/questions/37082583/elliptical-marquee-selection-then-fill-with-color-in-photoshop-using-javascript
    * @see https://stackoverflow.com/questions/35235191/how-do-i-create-a-circular-or-elliptical-selections-in-javascript-for-use-in-pho
    */
-  selectEllipse: (left: number, top: number, right: number, bottom: number) => `
+  selectEllipse: (left: number, top: number, right: number, bottom: number, feather = 0) => `
     ${helperFunctions}
     ${getContextInfo}
     ${selectionHelpers}
@@ -3124,6 +3163,8 @@ export const ExtendScriptSnippets = {
     desc.putBoolean(cTID('AntA'), true);
     executeAction(cTID('setd'), desc, DialogModes.NO);
 
+
+    ${feather > 0 ? `doc.selection.feather(${feather});` : ''}
     var result = {
       ok: true,
       has_selection: true,
@@ -3131,7 +3172,11 @@ export const ExtendScriptSnippets = {
       context: getContextInfo()
     };
     var boundsRead = __mcp_readSelectionBounds(doc);
-    if (boundsRead) result.bounds = boundsRead;
+
+    if (!boundsRead) {
+      return { ok: false, code: 'selection_required', message: 'Selection empty or outside canvas' };
+    }
+    result.bounds = boundsRead;
     return result;
   `,
 
@@ -5733,6 +5778,12 @@ export const ExtendScriptSnippets = {
     }
     var doc = app.activeDocument;
 
+    function readTargetBounds() {
+      try {
+        var b = doc.activeLayer.bounds;
+        return [b[0].as('px'), b[1].as('px'), b[2].as('px'), b[3].as('px')];
+      } catch (eBounds) { return null; }
+    }
     var target = null;
     try {
       for (var i = 0; i < doc.pathItems.length; i++) {
@@ -5872,6 +5923,9 @@ export const ExtendScriptSnippets = {
         ok: true,
         name: ${JSON.stringify(name)},
         dashed: true,
+        layer_id: doc.activeLayer.id,
+        target_bounds: readTargetBounds(),
+        bounds_kind: 'layer_content_after',
         dash: dashOn,
         gap: gapOff,
         color: [${red}, ${green}, ${blue}],
@@ -5890,6 +5944,9 @@ export const ExtendScriptSnippets = {
       ok: true,
       name: ${JSON.stringify(name)},
       dashed: false,
+      layer_id: doc.activeLayer.id,
+      target_bounds: readTargetBounds(),
+      bounds_kind: 'layer_content_after',
       color: [${red}, ${green}, ${blue}],
       context: getContextInfo()
     };
