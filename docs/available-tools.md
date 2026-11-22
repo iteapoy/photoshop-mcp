@@ -1,6 +1,6 @@
 # Available Tools
 
-**137 tools total** — 120 atomic `photoshop_*` tools plus 17 recipe `photoshop_recipe_*` workflows (single undo step each).
+**143 tools total** — 126 atomic `photoshop_*` tools plus 17 recipe `photoshop_recipe_*` workflows (single undo step each).
 
 Reference for all atomic `photoshop_*` MCP tools exposed by this server (parameters, examples, and return shapes).
 
@@ -1420,3 +1420,47 @@ Tool failures include `operation` and `phase` where available. Phases are
 An execution-phase parameter error originates in Photoshop, while a
 validation-phase error was rejected before execution. Timeouts leave the
 operation's completion uncertain.
+
+### Groups, visibility, and history recovery
+
+Layer targeting preserves visibility of existing layers and ancestor groups.
+The explicit visibility tool still applies the requested visibility. Selection
+by ID is also accepted by `photoshop_select_layer_by_name`; omit `name` in that
+case. Text, filter, mask and pixel-edit tools accept `layer_id` where applicable.
+`get_layers` reports `id`, `parent_id` (null at root), `depth` (root is 0),
+`kind: "group"` for groups, and pixel `bounds`. `layerCount` and
+`total_layer_count` include descendants and groups; `root_layer_count` and
+`context.document.layerCount` count only root entries.
+
+Group actions under `photoshop_layer`:
+
+| Action | Parameters |
+| --- | --- |
+| `create_group` | Optional `name`, `parent_group_id`, and sibling `layer_ids`. |
+| `group_layers` | Required nonempty sibling `layer_ids`, optional `name`. |
+| `move_layers_to_group` | `group_id` and nonempty sibling `layer_ids`. |
+| `ungroup` | `group_id`. |
+
+Input IDs are validated before moving layers. Existing stack order determines
+the result, independently of ID array order. Moving into a group inserts the
+selected layers above existing children. Ancestor/descendant cycles and
+artboards are rejected. Failed operations attempt to restore their document
+history checkpoint. Grouping noncontiguous layers changes their placement
+relative to intervening layers. Ungrouping removes group-level compositing,
+masks, effects and visibility inheritance, which can change appearance.
+
+History actions under `photoshop_document`:
+
+- `save_snapshot` takes a unique `name` and creates an in-memory full-document
+  snapshot. Closing the document discards it.
+- `revert_to_state` takes exactly one of `snapshot_name` or zero-based
+  `state_index`. Indices are returned by `get_history` and can change after
+  edits, so read history immediately before using an index.
+
+`execute_script` accepts `rollback_on_error: true` (default false). It records
+the target document history state before execution and attempts restoration
+when the script throws or returns an object with `ok:false`. The error/result
+reports `rollback` as `succeeded` or `failed: ...`. Recovery covers only
+recoverable history edits in that open document. Other documents, saved files,
+external side effects, closed documents and discarded history are outside that
+scope. A timeout does not guarantee that execution stopped or rollback finished.

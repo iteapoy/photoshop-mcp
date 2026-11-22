@@ -124,6 +124,8 @@ export const TOOL_ANNOTATIONS: Record<string, PhotoshopToolAnnotations> = {
 
   photoshop_undo: harm(false),
   photoshop_redo: harm(false),
+  photoshop_save_snapshot: edit(false),
+  photoshop_revert_to_state: harm(false),
   photoshop_get_history: read,
 
   photoshop_move_layer_to_position: edit(false),
@@ -181,6 +183,10 @@ export const TOOL_ANNOTATIONS: Record<string, PhotoshopToolAnnotations> = {
   photoshop_recipe_csv_to_cards: edit(false),
   photoshop_recipe_sticker_outline: edit(true),
 
+  photoshop_create_group: edit(false),
+  photoshop_group_layers: edit(false),
+  photoshop_move_layers_to_group: edit(false),
+  photoshop_ungroup: harm(false),
   photoshop_create_shape_layer: edit(false),
   photoshop_create_path: edit(false),
   photoshop_stroke_path: harm(false),

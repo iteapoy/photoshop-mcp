@@ -883,7 +883,7 @@ function getContextInfo() {
           var layer = doc.activeLayer;
           context.activeLayer = {
             id: layer.id,
-            parent_id: container.typename === 'LayerSet' ? container.id : null,
+            parent_id: layer.parent.typename === 'LayerSet' ? layer.parent.id : null,
             name: layer.name,
             kind: layer.typename === 'LayerSet' ? 'group' : String(layer.kind),
             opacity: layer.opacity,
@@ -2029,13 +2029,16 @@ export const ExtendScriptSnippets = {
     }
     var doc = app.activeDocument;
     var layers = [];
-    function collectLayers(container) {
+    function collectLayers(container, depth) {
       for (var i = 0; i < container.layers.length; i++) {
         var layer = container.layers[i];
         try {
           var entry = {
+            id: layer.id,
+            parent_id: container.typename === 'LayerSet' ? container.id : null,
+            depth: depth,
             name: layer.name,
-            kind: String(layer.kind),
+            kind: layer.typename === 'LayerSet' ? 'group' : String(layer.kind),
             visible: layer.visible,
             opacity: layer.opacity,
             blendMode: String(layer.blendMode),
@@ -2055,17 +2058,21 @@ export const ExtendScriptSnippets = {
         } catch (e) {
           var layerName = 'layer_' + layers.length;
           try { layerName = layer.name; } catch (e2) {}
-          layers.push({ name: layerName, error: e.message || String(e) });
+          layers.push({ id: layer.id, depth: depth, parent_id: container.typename === 'LayerSet' ? container.id : null, name: layerName, error: e.message || String(e) });
         }
         if (layer.typename === 'LayerSet') {
-          collectLayers(layer);
+          collectLayers(layer, depth + 1);
         }
       }
     }
-    collectLayers(doc);
+    collectLayers(doc, 0);
     
     var result = {
       layerCount: layers.length,
+      total_layer_count: layers.length,
+      root_layer_count: doc.layers.length,
+      bounds_unit: 'px',
+      count_semantics: { layerCount: 'recursive_including_groups', 'context.document.layerCount': 'root_layers_including_groups' },
       layers: layers,
       context: getContextInfo()
     };
@@ -2095,13 +2102,16 @@ export const ExtendScriptSnippets = {
       }
       return null;
     }
-    target = findLayer(doc, targetName);
+    target = typeof __mcp_targetLayerId !== 'undefined' ? doc.activeLayer : findLayer(doc, targetName);
     if (!target) {
       throw new Error('Layer not found: ' + targetName);
     }
+    var oldVisible = target.visible;
     doc.activeLayer = target;
+    target.visible = oldVisible;
     var result = {
       selected: true,
+      layer_id: target.id,
       layerName: target.name,
       kind: String(target.kind),
       context: getContextInfo()
@@ -3920,6 +3930,7 @@ export const ExtendScriptSnippets = {
     for (var i = 0; i < doc.historyStates.length; i++) {
       var state = doc.historyStates[i];
       states.push({
+        index: i,
         name: state.name,
         snapshot: state.snapshot || false
       });

@@ -44,6 +44,7 @@ export interface PhotoshopErrorEnvelope {
   native_code?: number;
   line?: number;
   operation?: string;
+  rollback?: string;
   phase?: 'validation' | 'target_resolution' | 'execution' | 'timeout' | 'unknown';
 }
 

@@ -1,3 +1,4 @@
+import { rollbackScript } from './history-state-tools.js';
 import { ToolDefinition, ToolResult } from '../core/tool-registry.js';
 import { PhotoshopConnection } from '../platform/connection.js';
 import { PhotoshopAPIFactory } from '../api/photoshop-api.js';
@@ -54,6 +55,10 @@ export function createActionTools(connection: PhotoshopConnection): ToolDefiniti
         inputSchema: {
           type: 'object',
           properties: {
+            rollback_on_error: {
+              type: 'boolean', default: false,
+              description: 'Restore the target document history checkpoint on a thrown error or returned ok:false. Limited to edits in that open document; saved files, other documents and external effects are not rolled back. A timeout cannot guarantee immediate rollback.',
+            },
             code: {
               type: 'string',
               description: 'ExtendScript code to execute',
@@ -122,9 +127,18 @@ async function executeCustomScript(
     const timeoutMs = resolveScriptTimeoutMs(
       typeof args.timeout_ms === 'number' ? args.timeout_ms : undefined
     );
-    const script = ExtendScriptSnippets.executeCustomScript(code);
+    if (typeof code !== 'string' || !code.trim()) throw new Error('Invalid parameter: code is required');
+    if (args.rollback_on_error !== undefined && typeof args.rollback_on_error !== 'boolean') {
+      throw new Error('Invalid parameter: rollback_on_error must be boolean');
+    }
+    const script = ExtendScriptSnippets.executeCustomScript(
+      args.rollback_on_error ? rollbackScript(code) : code
+    );
     const result = await api.executeScript(script, timeoutMs);
 
+    if (result && typeof result === 'object' && (result as { ok?: boolean }).ok === false) {
+      return { isError: true, content: [{ type: 'text', text: JSON.stringify(result) }] };
+    }
     return {
       content: [
         {
@@ -144,6 +158,8 @@ async function executeCustomScript(
       envelope.operation = 'execute_script';
       if (nativeCode) envelope.native_code = Number(nativeCode[1]);
       if (line) envelope.line = Number(line[1]);
+      const rollback = message.match(/rollback: ([^)]+)/);
+      if (rollback) envelope.rollback = rollback[1];
       text.text = JSON.stringify(envelope);
     }
     return result;

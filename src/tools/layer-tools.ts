@@ -260,10 +260,10 @@ export function createLayerTools(connection: PhotoshopConnection): ToolDefinitio
       tool: {
         name: 'photoshop_get_layers',
         description:
-          'List all layers in the active document with kind, visibility, and opacity.\n\n' +
+          'List all layers recursively with id, parent_id, depth, kind, pixel bounds, visibility, and opacity.\n\n' +
           'Use when: choosing a layer to edit, debugging structure, or after organize_layers.\n' +
           'Do NOT use when: only session summary is needed — use photoshop_get_state (lighter).\n\n' +
-          'Returns: plain JSON (no text prefix) with layerCount, layers array (LayerSets include is_artboard), context.\n' +
+          'Returns: plain JSON with recursive layerCount/total_layer_count, root_layer_count, layers array, and context. context.document.layerCount counts root layers.\n' +
           'Preconditions: active document. Side effects: none.',
         inputSchema: {
           type: 'object',
@@ -548,7 +548,10 @@ async function selectLayerByName(
   connection: PhotoshopConnection,
   args: Record<string, unknown>
 ): Promise<ToolResult> {
-  const name = args.name as string;
+  const name = typeof args.name === 'string' ? args.name : '';
+  if (!name && args.layer_id === undefined) {
+    return atomicFailureFromError(new Error('Invalid parameter: name or layer_id is required'));
+  }
 
   try {
     const apiFactory = new PhotoshopAPIFactory(connection);

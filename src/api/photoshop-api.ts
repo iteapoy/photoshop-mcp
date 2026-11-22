@@ -1,4 +1,4 @@
-import { getTargetLayerId, layerGuardScript } from '../core/layer-target.js';
+import { getTargetLayerId, layerGuardScript, shouldPreserveLayerVisibility } from '../core/layer-target.js';
 import { Logger } from '../utils/logger.js';
 import { PhotoshopConnection } from '../platform/connection.js';
 import { documentGuardScript, getTargetDocumentId } from '../core/document-target.js';
@@ -171,12 +171,29 @@ class ExtendScriptPhotoshopAPI implements PhotoshopAPI {
     // regardless of the user's Photoshop preferences. The user's original
     // preferences are restored in the finally block.
     const targetId = getTargetDocumentId();
+    const preserveVisibility = shouldPreserveLayerVisibility();
     const layerId = getTargetLayerId();
     const layerGuard = layerId === undefined ? '' : layerGuardScript(layerId);
     const documentGuard = typeof targetId === 'number' ? documentGuardScript(targetId) : '';
     return `
 (function() {
   var __mcp_phase = 'target_resolution';
+  var __mcp_visibility = [];
+  function __mcp_captureVisibility(container) {
+    for (var i = 0; i < container.layers.length; i++) {
+      var layer = container.layers[i];
+      __mcp_visibility.push({ layer: layer, visible: layer.visible });
+      if (layer.typename === 'LayerSet') __mcp_captureVisibility(layer);
+    }
+  }
+  function __mcp_restoreVisibility() {
+    for (var i = 0; i < __mcp_visibility.length; i++) {
+      try {
+        var entry = __mcp_visibility[i];
+        if (entry.layer.visible !== entry.visible) entry.layer.visible = entry.visible;
+      } catch (eVisibility) {}
+    }
+  }
   var __originalRulerUnits = null;
   var __originalTypeUnits = null;
   var __origDialogs = null;
@@ -208,12 +225,14 @@ class ExtendScriptPhotoshopAPI implements PhotoshopAPI {
     try { app.preferences.typeUnits = TypeUnits.POINTS; } catch (e) {}
 
     ${documentGuard}
+    ${preserveVisibility ? 'if (app.documents.length) __mcp_captureVisibility(app.activeDocument);' : ''}
     ${layerGuard}
     __mcp_phase = 'execution';
 
     var result = (function() {
       ${script}
     })();
+    __mcp_restoreVisibility();
     if (typeof result === 'object' && result !== null) {
       return result.toSource ? result.toSource() : String(result);
     }
@@ -236,6 +255,7 @@ class ExtendScriptPhotoshopAPI implements PhotoshopAPI {
     }
     return 'ERROR: ' + errorMessage;
   } finally {
+    __mcp_restoreVisibility();
     try { if (__originalRulerUnits !== null) app.preferences.rulerUnits = __originalRulerUnits; } catch (e) {}
     try { if (__originalTypeUnits !== null) app.preferences.typeUnits = __originalTypeUnits; } catch (e) {}
     try { if (__origDialogs !== null) app.displayDialogs = __origDialogs; } catch (e) {}

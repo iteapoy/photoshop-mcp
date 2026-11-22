@@ -1,3 +1,5 @@
+import { createGroupTools } from '../tools/group-tools.js';
+import { createHistoryStateTools } from '../tools/history-state-tools.js';
 import { withOptionalLayerId, wrapLayerIdHandler } from './layer-target.js';
 import { createShapeTools } from '../tools/shape-tools.js';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
@@ -124,6 +126,7 @@ export class PhotoshopMCPServer {
 
     this.registerToolDefinitions(createDocumentTools(connection));
     this.registerToolDefinitions(createLayerTools(connection));
+    this.registerToolDefinitions(createGroupTools(connection));
     this.registerToolDefinitions(createImageTools(connection));
     this.registerToolDefinitions(createImagePlacementTools(connection));
     this.registerToolDefinitions(createSmartObjectTools(connection));
@@ -136,6 +139,7 @@ export class PhotoshopMCPServer {
     this.registerToolDefinitions(createMaskTools(connection));
     this.registerToolDefinitions(createActionTools(connection));
     this.registerToolDefinitions(createHistoryTools(connection));
+    this.registerToolDefinitions(createHistoryStateTools(connection));
     this.registerToolDefinitions(createLayerOrderingTools(connection));
     this.registerToolDefinitions(createStateTools(connection));
     this.registerToolDefinitions(createGenerativeTools(connection));
