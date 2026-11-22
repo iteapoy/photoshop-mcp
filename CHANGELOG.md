@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Parse ExtendScript `toSource()` results with a strict literal reader instead of `new Function`, preventing returned payloads from executing as server-side code (upstream #90, commit 5576986).
 - `photoshop_get_layers` returns plain JSON. The `Layers:` prefix forced every programmatic caller to strip it before parsing; a tool message that is a payload no longer carries a text label.
 - `photoshop_move_layer_up/_down/_to_top/_to_bottom` use the layer's own group for stack order and compare layers by id. A layer inside a group used to report "already at the top/bottom" because the index came from `document.layers`; `_to_bottom` also stops right above the background instead of trying to move below it.
 - `photoshop_get_preview` with `layer_name` actually works. The preview copy was made with `duplicate(name, true)`, which merges every layer, so the solo step could never find the layer and the tool failed with `layer_not_found`. The copy is no longer merged, and it is closed in a `finally` — a failed solo used to leave a stray `__mcp_preview__` document open in the workspace.
