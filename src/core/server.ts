@@ -3,6 +3,7 @@ import { createGroupTools } from '../tools/group-tools.js';
 import { createHistoryStateTools } from '../tools/history-state-tools.js';
 import { withOptionalLayerId, wrapLayerIdHandler } from './layer-target.js';
 import { createShapeTools } from '../tools/shape-tools.js';
+import { createLayoutTools } from '../tools/layout-tools.js';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import {
@@ -155,6 +156,7 @@ export class PhotoshopMCPServer {
     this.registerToolDefinitions(createRecipeTools(connection));
     this.registerToolDefinitions(createPathTools(connection));
     this.registerToolDefinitions(createShapeTools(connection));
+    this.registerToolDefinitions(createLayoutTools(connection));
 
     this.logger.info(
       `Registered ${this.toolRegistry.count()} tools and ${this.promptRegistry.count()} prompts`

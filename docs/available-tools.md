@@ -1,6 +1,6 @@
 # Available Tools
 
-**144 tools total** — 127 atomic `photoshop_*` tools plus 17 recipe `photoshop_recipe_*` workflows (single undo step each).
+**132 tools total** — 115 atomic `photoshop_*` tools plus 17 recipe `photoshop_recipe_*` workflows (single undo step each).
 
 Reference for all atomic `photoshop_*` MCP tools exposed by this server (parameters, examples, and return shapes).
 
@@ -241,7 +241,10 @@ photoshop_fill_layer({
 ```
 
 #### `photoshop_get_layers`
-Get list of all layers in the active document.
+List every layer recursively (id, parent, depth, kind, bounds, visibility, opacity, blend mode).
+
+**Parameters:**
+- `include_context` (boolean, optional): append the session context block of `photoshop_get_state` (default `false`; the layer list alone is much smaller)
 
 ```javascript
 // Example: List all layers
@@ -354,79 +357,18 @@ photoshop_rasterize_layer({ layer_name: "Title" })
 
 ### Layer Ordering
 
-#### `photoshop_move_layer_to_position`
-Move a layer relative to another layer.
+#### `photoshop_reorder_layer`
+Change stacking order without changing canvas coordinates. `top` and `bottom` operate within the source layer's containing group.
 
 **Parameters:**
-- `targetLayerName` (string, required): Name of the reference layer
-- `position` (string, required): ABOVE, BELOW, TOP, or BOTTOM
-- `layer_name` (string, optional): Target layer by name (searches nested groups). Omit to act on the active layer.
+- `position` (required): `up` | `down` | `top` | `bottom` | `above` | `below`
+- `layer_id` or `layer_name` (optional): source; omit for the active layer
+- `target_layer_id` or `target_layer_name`: exactly one is required for `above`/`below`; prohibited for the other positions
 
 ```javascript
-// Example: Move layer above "Background"
-photoshop_move_layer_to_position({
-  targetLayerName: "Background",
-  position: "ABOVE"
-})
+photoshop_reorder_layer({ position: "top", layer_id: 12 })
+photoshop_reorder_layer({ position: "above", layer_id: 12, target_layer_id: 34 })
 ```
-
-#### `photoshop_move_layer_to_top`
-Move a layer to the top of its own group (or of the document).
-
-**Parameters:**
-- `layer_name` (string, optional): Target layer by name (searches nested groups). Omit to act on the active layer.
-
-```javascript
-// Example: Move to top
-photoshop_move_layer_to_top()
-
-// Example: target a named layer
-photoshop_move_layer_to_top({ layer_name: "透视辅助线" })
-```
-
-#### `photoshop_move_layer_to_bottom`
-Move a layer to the bottom of its own group (or of the document).
-
-**Parameters:**
-- `layer_name` (string, optional): Target layer by name (searches nested groups). Omit to act on the active layer.
-
-```javascript
-// Example: Move to bottom
-photoshop_move_layer_to_bottom()
-
-// Example: target a named layer
-photoshop_move_layer_to_bottom({ layer_name: "透视辅助线" })
-```
-
-#### `photoshop_move_layer_up`
-Move a layer up one position inside its own group.
-
-**Parameters:**
-- `layer_name` (string, optional): Target layer by name (searches nested groups). Omit to act on the active layer.
-
-```javascript
-// Example: Move up
-photoshop_move_layer_up()
-
-// Example: target a named layer
-photoshop_move_layer_up({ layer_name: "透视辅助线" })
-```
-
-#### `photoshop_move_layer_down`
-Move a layer down one position inside its own group.
-
-**Parameters:**
-- `layer_name` (string, optional): Target layer by name (searches nested groups). Omit to act on the active layer.
-
-```javascript
-// Example: Move down
-photoshop_move_layer_down()
-
-// Example: target a named layer
-photoshop_move_layer_down({ layer_name: "透视辅助线" })
-```
-
-### Layer Transformations
 
 #### `photoshop_fit_layer_to_document`
 Scale a layer to fit the document canvas while maintaining aspect ratio.
@@ -485,6 +427,62 @@ Rotate a layer around its center.
 ```javascript
 // Example: Rotate 45 degrees clockwise
 photoshop_rotate_layer({ degrees: 45 })
+```
+
+#### `photoshop_align_layers`
+Align one or more layers to the canvas or to a reference layer. Without a shared align command, this replaces a hand-computed `photoshop_move_layer` delta per layer.
+
+**Parameters:**
+- `align` (string, required): `left` | `hcenter` | `right` | `top` | `vcenter` | `bottom`
+- `target` (string, optional): `canvas` (default) or `layer`
+- `target_layer_name` (string, optional): reference layer when `target` is `layer`
+- `layer_names` (array, optional): layers to move; omit for the active layer
+
+Returns `moved[]` and `skipped[]` (background layers, empty layers, layers already aligned).
+
+```javascript
+// Example: Center three labels on the canvas horizontally
+photoshop_align_layers({ align: "hcenter", layer_names: ["字 · RA.18H", "字 · DEC.24"] })
+
+// Example: Bottom-align a label with another layer
+photoshop_align_layers({ align: "bottom", target: "layer", target_layer_name: "12 量角弧", layer_names: ["字 · +12"] })
+```
+
+#### `photoshop_distribute_layers`
+Space three or more layers evenly along one axis. `gaps` sorts by leading edge and equalizes the space between edges; `centers` sorts by center coordinate, keeps the outer two centers, and spreads the centers between them.
+
+**Parameters:**
+- `layer_names` (array, required): at least three layers; sorted along the axis before spacing
+- `axis` (string, optional): `horizontal` (default) | `vertical`
+- `mode` (string, optional): `gaps` (default) | `centers`
+
+```javascript
+// Example: Equal vertical gaps between four ticks
+photoshop_distribute_layers({ axis: "vertical", layer_names: ["04b 段端", "07 内梳齿", "08 内盘环", "12b 量角端"] })
+```
+
+#### `photoshop_duplicate_array`
+Duplicate a layer into a rotated ring or a linear run — ticks, marks, labels, and stars without a duplicate/rotate/translate loop.
+
+**Parameters:**
+- `count` (number, required): total instances including the source (2-100)
+- `mode` (string, optional): `rotate` (default) | `linear`
+- `pivot_x` / `pivot_y` (number, optional): ring center in pixels (default: document center)
+- `total_degrees` (number, optional): angle covered by the ring, source included (default 360)
+- `start_degrees` (number, optional): angle of the first copy (default 0)
+- `offset_x` / `offset_y` (number, optional): linear mode step per copy in pixels
+- `layer_name` (string, optional): source layer; omit for the active layer
+
+Copy names are the source name plus a 1-based index. Not idempotent: each call adds `count - 1` layers.
+
+Alignment, distribution, and arrays reject position-locked or fully locked targets (including containing groups). If execution fails, they restore the pre-call history state, active layer, and visibility; a failed rollback is reported explicitly.
+
+```javascript
+// Example: 12 ticks around the canvas center
+photoshop_duplicate_array({ layer_name: "06 外梳齿", count: 12, total_degrees: 360 })
+
+// Example: a horizontal row of 5 marks, 40 px apart
+photoshop_duplicate_array({ layer_name: "09 四角标记", count: 5, mode: "linear", offset_x: 40 })
 ```
 
 ### Filters
@@ -633,16 +631,6 @@ Apply auto contrast adjustment.
 photoshop_auto_contrast()
 ```
 
-#### `photoshop_adjust_curves`
-Create a Curves adjustment layer on the active document.
-
-**Parameters:**
-- `preset` (string, optional): `auto_tone` (S-curve) or `neutral` (identity curve); default `auto_tone`
-
-```javascript
-// Example: Auto-tone S-curve
-photoshop_adjust_curves({ preset: 'auto_tone' })
-```
 
 #### `photoshop_desaturate`
 Desaturate the layer (convert to grayscale).
@@ -671,7 +659,7 @@ List installed fonts available to Photoshop. First call may be slow (`app.fonts`
 
 **Returns:** `{ fonts: [{ name, postScriptName, family, style }], total, truncated }`
 
-Use `postScriptName` when setting fonts manually via `execute_script`; `photoshop_set_text_font` and `photoshop_create_text_layer` resolve display names automatically. A font that is not installed can be added with `photoshop_install_font`, which reloads the open app's font list.
+Use `postScriptName` when setting fonts manually via `execute_script`; `photoshop_set_text_style` and `photoshop_create_text_layer` resolve display names automatically. A font that is not installed can be added with `photoshop_install_font`, which reloads the open app's font list.
 
 ```javascript
 // Example: Find Arial variants
@@ -684,7 +672,7 @@ Install a `.ttf`, `.otf`, `.ttc`, or `.otc` for the current user. Does not downl
 - macOS: copies it to `~/Library/Fonts` (Font Book, Current User).
 - Windows: installs it for the current user only.
 
-If Photoshop is open, the tool calls `app.refreshFonts()` (`Application.refreshFonts` in the Photoshop JavaScript Reference) so `photoshop_list_fonts` sees the new names without quitting. The result includes `post_script_names` to pass to `photoshop_set_text_font`.
+If Photoshop is open, the tool calls `app.refreshFonts()` (`Application.refreshFonts` in the Photoshop JavaScript Reference) so `photoshop_list_fonts` sees the new names without quitting. The result includes `post_script_names` to pass to `photoshop_set_text_style`.
 
 Fredoka Bold is the named instance `Fredoka-Bold` inside Google Fonts' variable file `Fredoka[wdth,wght].ttf` (SIL Open Font License). It is not a separate Bold file.
 
@@ -695,48 +683,8 @@ Fredoka Bold is the named instance `Fredoka-Bold` inside Google Fonts' variable 
 photoshop_install_font({ file_path: "/Users/me/Fonts/Fredoka[wdth,wght].ttf" })
 ```
 
-#### `photoshop_set_text_font`
-Set font family and size for active text layer. Accepts display name (e.g. `"Arial"`) or PostScript name (e.g. `"ArialMT"`).
 
-**Parameters:**
-- `fontName` (string, required): Font display or PostScript name (use `photoshop_list_fonts` to discover)
-- `fontSize` (number, optional): Font size in points
 
-```javascript
-// Example: Change font
-photoshop_set_text_font({
-  fontName: "Helvetica",
-  fontSize: 48
-})
-```
-
-#### `photoshop_set_text_color`
-Set color for active text layer.
-
-**Parameters:**
-- `red` (number, required): Red component (0-255)
-- `green` (number, required): Green component (0-255)
-- `blue` (number, required): Blue component (0-255)
-
-```javascript
-// Example: Set text to blue
-photoshop_set_text_color({
-  red: 0,
-  green: 100,
-  blue: 255
-})
-```
-
-#### `photoshop_set_text_alignment`
-Set text alignment.
-
-**Parameters:**
-- `alignment` (string, required): LEFT, CENTER, RIGHT, LEFTJUSTIFIED, CENTERJUSTIFIED, RIGHTJUSTIFIED, FULLYJUSTIFIED
-
-```javascript
-// Example: Center align text
-photoshop_set_text_alignment({ alignment: "CENTER" })
-```
 
 #### `photoshop_update_text_content`
 Update text content of active text layer.
@@ -747,6 +695,23 @@ Update text content of active text layer.
 ```javascript
 // Example: Update text
 photoshop_update_text_content({ text: "New Text" })
+```
+
+#### `photoshop_get_text`
+Read a text layer's content and typography. Set `all: true` to audit every text layer in the document at once.
+
+**Parameters:**
+- `all` (boolean, optional): return every text layer instead of one (default `false`)
+- `layer_name` (string, optional): target text layer by name; omit for the active layer
+
+Returns `contents`, `font`, `size` (pt), `tracking`, `leading`, `kind`, `box_width`/`box_height`, `alignment`, `red`/`green`/`blue`, and pixel `bounds`. This is the read counterpart of `photoshop_update_text_content` / `photoshop_set_text_style`.
+
+```javascript
+// Example: What does this label say, and in what font?
+photoshop_get_text({ layer_name: "字 · RA.18H" })
+
+// Example: audit every label in the document
+photoshop_get_text({ all: true })
 ```
 
 #### `photoshop_set_text_style`
@@ -1228,37 +1193,23 @@ photoshop_recipe_sticker_outline({ outline_style: "die_cut", stroke_width: 16, l
 
 ### Color Grading
 
-#### `photoshop_apply_lut`
-Color Lookup (3D LUT) adjustment layer — cinematic grades in one step.
+Use `photoshop_create_adjustment_layer` with `type` and validated per-type `params`:
 
-**Parameters:**
-- `lut` (string, required): Built-in LUT name (e.g. `"Crisp_Warm.3dl"`, `"Kodak 5218 Fuji 3510.3dl"`, `"Moonlight.3dl"`) or absolute path to a `.cube`/`.3dl`/`.look` file
+| Type | Parameters |
+| --- | --- |
+| `color_lookup` | Required `lut`: built-in LUT name or an absolute `.cube`/`.3dl`/`.look` path. |
+| `vibrance` | `vibrance` (-100..100), `saturation` (-100..100). |
+| `exposure` | `exposure` in stops, `offset`, `gamma`. |
+| `photo_filter` | `red`, `green`, `blue`, `density`, `preserve_luminosity`. |
+| `black_and_white` | Photoshop defaults; no parameters. |
+| `posterize` | `levels` (2..255). |
+| `threshold` | `level` (1..255). |
+| `gradient_map` | `reverse` (boolean). |
+| `curves` | `preset`: `auto_tone` or `neutral`. |
 
 ```javascript
-photoshop_apply_lut({ lut: "Crisp_Warm.3dl" })
+photoshop_create_adjustment_layer({ type: "color_lookup", params: { lut: "Crisp_Warm.3dl" } })
 ```
-
-#### `photoshop_adjust_vibrance`
-Vibrance adjustment layer. **Parameters:** `vibrance` (-100..100, default 40), `saturation` (-100..100, default 0)
-
-#### `photoshop_adjust_exposure`
-Exposure adjustment layer. **Parameters:** `exposure` (stops, default 0.5), `offset` (default 0), `gamma` (default 1)
-
-#### `photoshop_apply_photo_filter`
-Photo Filter adjustment layer (warming/cooling/tint). **Parameters:** `red`, `green`, `blue` (default 236/138/0 ≈ warming 85), `density` (0-100, default 25), `preserve_luminosity` (default true)
-
-#### Tonal adjustment layers
-
-These tools add editable adjustment layers in the active document.
-
-| Tool | Parameters |
-| --- | --- |
-| `photoshop_create_black_and_white_adjustment_layer` | Uses Photoshop's default Black & White settings. |
-| `photoshop_create_posterize_adjustment_layer` | `levels` (integer 2–255, default 4). |
-| `photoshop_create_threshold_adjustment_layer` | `level` (integer 1–255, default 128). |
-
-#### `photoshop_apply_gradient_map`
-Gradient Map adjustment layer (black→white). **Parameters:** `reverse` (boolean, default false)
 
 ### Data-Driven Graphics
 
@@ -1361,15 +1312,30 @@ Export a copy as PNG/JPEG (Save for Web) or WebP/AVIF (native, PS 23.2+). Return
 - `quality` (number, optional): 0-100 (default 80)
 - `artboard_id` (number, optional): export only that artboard (from `photoshop_list_artboards`)
 
+#### `photoshop_export_layer`
+Export one layer as its own image file, trimmed to its content by default. The source document is not modified; the tool works on a temporary duplicate. Group exports preserve visibility inside the target group. Use `layer_id` to select an exact target when names repeat; the duplicate is located by its hierarchy index path, not by name.
+
+**Parameters:**
+- `path` (string, optional): absolute output path; omit to auto-name in `~/.photoshop-mcp/exports`
+- `format` (string, optional): `PNG` | `JPEG` | `WEBP` (default PNG; WebP needs PS 23.2+)
+- `quality` (number, optional): 0-100 for JPEG/WebP (default 90)
+- `trim` (boolean, optional): trim transparent margins (default `true`)
+- `layer_name` (string, optional): target layer; omit for the active layer
+
+```javascript
+// Example: Export a star layer as a standalone PNG
+photoshop_export_layer({ layer_name: "10b 主星", format: "PNG" })
+```
+
 #### `photoshop_create_adjustment_layer`
 
 Create an editable adjustment layer using `{ type, params }`. Supported types
 are `black_and_white`, `posterize`, `threshold`, `exposure`, `vibrance`,
 `curves`, `photo_filter`, `color_lookup`, and `gradient_map`.
-Parameters match the corresponding legacy tool. Unknown parameters, incorrect
+Each type has its own schema. Unknown parameters, incorrect
 types, and out-of-range values return an error before Photoshop is called.
-Legacy tools remain callable for compatibility. The HTTP grouped surface shows
-`adjust/create_adjustment_layer` in place of the nine individual actions.
+Use `adjust/create_adjustment_layer` in grouped mode. Individual adjustment-layer
+tool names have been removed.
 
 Example: `{ "type": "threshold", "params": { "level": 160 } }`.
 
@@ -1436,8 +1402,7 @@ Group actions under `photoshop_layer`:
 
 | Action | Parameters |
 | --- | --- |
-| `create_group` | Optional `name`, `parent_group_id`, and sibling `layer_ids`. |
-| `group_layers` | Required nonempty sibling `layer_ids`, optional `name`. |
+| `create_group` | Optional `name`, `parent_group_id`, and sibling `layer_ids`; omit IDs for an empty group or supply IDs to group layers. |
 | `move_layers_to_group` | `group_id` and nonempty sibling `layer_ids`. |
 | `ungroup` | `group_id`. |
 
@@ -1490,3 +1455,11 @@ Invalid charID lengths return `invalid_arguments` before Photoshop execution
 and explain the four-character requirement. Four-character inputs also return
 both interpretations for comparison. A four-character stringID can be valid;
 ID kind must be explicit and numeric IDs alone do not prove descriptor semantics.
+
+### Breaking tool consolidation
+
+Only the canonical entries are registered: `create_adjustment_layer` replaces
+nine individual adjustment-layer tools, `set_text_style` replaces font/color/
+alignment setters, `reorder_layer` replaces five stacking-order tools, and
+`create_group` with optional `layer_ids` replaces `group_layers`. Old tool names
+and group actions are rejected; no aliases or legacy schema discovery remain.

@@ -1,42 +1,14 @@
 /**
- * Grouped ("category -> action") tool surface for the HTTP bridge.
- *
- * Why
- * ---
- * MCP has no hierarchical tools: `tools/list` is a flat array and every tool
- * carries its own full JSON Schema. photoshop-mcp exposes 120 tools, which is
- * ~148k chars (~41k tokens) of context on every single request in any host
- * that eagerly loads custom MCP tools (WorkBuddy does).
- *
- * This module collapses the 120 tools into 12 umbrella tools, one per domain,
- * each taking `{ action, params }`. The per-action signatures are rendered into
- * the umbrella description, so the model still sees every action and its
- * parameter names — at ~1/10 of the characters.
- *
- * The bridge keeps the real schemas and validates every call, so a malformed
- * call comes back with the exact expected signature instead of an opaque
- * upstream error.
- *
- * One calling convention, two entry points
- * ----------------------------------------
- *   group tool      { action: "get_layers", params: { document_id: 3 } }
- *   photoshop_call  { tool: "photoshop_get_layers", params: { document_id: 3 } }
- *
- * Both name the payload `params`. `arguments` / `args` are still accepted as
- * legacy aliases (and flat siblings of the action key are merged in), but they
- * are never advertised: one shape is easier to remember than two. Nested
- * wrappers of any depth are spliced by `unwrapNestedArgs`.
- *
- * Config: ~/.photoshop-mcp/tool-groups.json
- *   {
- *     "rawTool": true,                    // expose photoshop_call escape hatch
- *     "overrides": { "photoshop_foo": "layer" }
- *   }
+ * HTTP tool discovery: domain groups accept { action, params }; photoshop_call
+ * accepts { tool, params }. Query photoshop_schema for per-action parameters.
+ * Original schemas validate calls; wrapper aliases are normalized by extractCall
+ * and unwrapNestedArgs. Group overrides live in ~/.photoshop-mcp/tool-groups.json.
  */
 
 import { readFileSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+
 
 export const GROUPS_FILE = join(homedir(), '.photoshop-mcp', 'tool-groups.json');
 
@@ -198,7 +170,7 @@ export function groupOf(toolName, config = loadGroupConfig()) {
   ) {
     return 'adjust';
   }
-  if (['create_group', 'group_layers', 'move_layers_to_group', 'ungroup'].includes(s)) return 'layer';
+  if (['create_group', 'move_layers_to_group', 'ungroup'].includes(s)) return 'layer';
   if (s === 'resolve_ids') return 'system';
   if (s === 'save_snapshot' || s === 'revert_to_state') return 'document';
   if (s === 'create_shape_layer') return 'path';
@@ -267,18 +239,8 @@ function compactDesc(text, max = 72) {
 // umbrella tool construction
 // ---------------------------------------------------------------------------
 export function buildGroupedTools(tools, config = loadGroupConfig()) {
-  const mergedAdjustments = new Set([
-    'photoshop_create_black_and_white_adjustment_layer',
-    'photoshop_create_posterize_adjustment_layer',
-    'photoshop_create_threshold_adjustment_layer',
-    'photoshop_adjust_exposure', 'photoshop_adjust_vibrance',
-    'photoshop_adjust_curves', 'photoshop_apply_photo_filter',
-    'photoshop_apply_lut', 'photoshop_apply_gradient_map',
-  ]);
-  const hasUnifiedAdjustment = tools.some((tool) => tool.name === 'photoshop_create_adjustment_layer');
   const byGroup = new Map();
   for (const tool of tools) {
-    if (hasUnifiedAdjustment && mergedAdjustments.has(tool.name)) continue;
     const g = groupOf(tool.name, config);
     if (!GROUPS[g]) {
       // Unknown override target: fall back so the tool is never lost.
@@ -584,7 +546,7 @@ export function findToolByName(tools, name) {
 export function resolveAction(tools, action) {
   const raw = String(action ?? '').trim();
   if (!raw) return null;
-  const candidates = [raw, `photoshop_${raw}`, raw.replace(/^photoshop_/, 'photoshop_')];
+  const candidates = [raw, `photoshop_${raw}`];
   const slash = raw.indexOf('/');
   if (slash > 0) {
     const a = raw.slice(slash + 1).trim();

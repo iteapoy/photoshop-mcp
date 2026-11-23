@@ -1,20 +1,34 @@
 import type { ToolDefinition } from '../core/tool-registry.js';
 import type { PhotoshopConnection } from '../platform/connection.js';
-import { atomicFailureFromError, atomicSuccess, parseSnippetResult, runSnippet } from './atomic-shared.js';
+import {
+  atomicFailureFromError,
+  atomicSuccess,
+  parseSnippetResult,
+  runSnippet,
+} from './atomic-shared.js';
 
-type GroupAction = 'create_group' | 'group_layers' | 'move_layers_to_group' | 'ungroup';
+type GroupAction = 'create_group' | 'move_layers_to_group' | 'ungroup';
 export function groupScript(action: GroupAction, args: Record<string, unknown>): string {
   const ids = args.layer_ids ?? [];
-  if (!Array.isArray(ids) || ids.some((id) => typeof id !== 'number' || !Number.isSafeInteger(id) || id <= 0) ||
-      new Set(ids).size !== ids.length) throw new Error('Invalid parameter: layer_ids must contain unique positive integers');
-  if ((action === 'group_layers' || action === 'move_layers_to_group') && !ids.length) {
+  if (
+    !Array.isArray(ids) ||
+    ids.some((id) => typeof id !== 'number' || !Number.isSafeInteger(id) || id <= 0) ||
+    new Set(ids).size !== ids.length
+  )
+    throw new Error('Invalid parameter: layer_ids must contain unique positive integers');
+  if (action === 'move_layers_to_group' && !ids.length) {
     throw new Error('Invalid parameter: layer_ids must not be empty');
   }
   if (args.name !== undefined && (typeof args.name !== 'string' || !args.name.trim())) {
     throw new Error('Invalid parameter: name must be non-empty');
   }
   for (const key of ['group_id', 'parent_group_id']) {
-    if (args[key] !== undefined && (typeof args[key] !== 'number' || !Number.isSafeInteger(args[key]) || (args[key] as number) <= 0)) {
+    if (
+      args[key] !== undefined &&
+      (typeof args[key] !== 'number' ||
+        !Number.isSafeInteger(args[key]) ||
+        (args[key] as number) <= 0)
+    ) {
       throw new Error('Invalid parameter: ' + key + ' must be a positive integer');
     }
   }
@@ -74,7 +88,7 @@ export function groupScript(action: GroupAction, args: Record<string, unknown>):
         }
         if (selected[i].typename === 'LayerSet') assertGroup(selected[i]);
       }
-      if (${action === 'group_layers' || action === 'create_group'}) {
+      if (${action === 'create_group'}) {
         if (${args.parent_group_id !== undefined} && parent.id !== sourceParent.id) {
           throw new Error('Invalid parameter: parent_group_id must match selected layers parent');
         }
@@ -91,7 +105,7 @@ export function groupScript(action: GroupAction, args: Record<string, unknown>):
       }
     }
     try {
-      if (${action === 'create_group' || action === 'group_layers'}) {
+      if (${action === 'create_group'}) {
         group = parent.layerSets.add();
         group.name = ${JSON.stringify(args.name ?? 'Group')};
         if (selected.length) group.move(selected[0], ElementPlacement.PLACEBEFORE);
@@ -124,21 +138,47 @@ export function groupScript(action: GroupAction, args: Record<string, unknown>):
 export function createGroupTools(connection: PhotoshopConnection): ToolDefinition[] {
   const idList = { type: 'array', items: { type: 'integer', minimum: 1 }, uniqueItems: true };
   const operations: Array<{
-    action: GroupAction; name: string; description: string; properties: Record<string, object>; required: string[];
+    action: GroupAction;
+    name: string;
+    description: string;
+    properties: Record<string, object>;
+    required: string[];
   }> = [
-    { action: 'create_group' as const, name: 'photoshop_create_group', description: 'Create a group, optionally grouping sibling layer_ids in existing stack order. parent_group_id selects a parent for an empty group.',
-      properties: { name: { type: 'string' }, layer_ids: idList, parent_group_id: { type: 'integer', minimum: 1 } }, required: [] },
-    { action: 'group_layers' as const, name: 'photoshop_group_layers', description: 'Group sibling layer_ids in existing stack order. Preserves individual visibility. Noncontiguous layers become contiguous inside the new group.',
-      properties: { name: { type: 'string' }, layer_ids: idList }, required: ['layer_ids'] },
-    { action: 'move_layers_to_group' as const, name: 'photoshop_move_layers_to_group', description: 'Move sibling layer_ids to the top of group_id, preserving their relative stack order and individual visibility. Rejects cyclic nesting.',
-      properties: { group_id: { type: 'integer', minimum: 1 }, layer_ids: idList }, required: ['group_id', 'layer_ids'] },
-    { action: 'ungroup' as const, name: 'photoshop_ungroup', description: 'Remove a group and move children to its parent in stack order. Removes group compositing, effects, masks and visibility inheritance, so appearance can change. Artboards are rejected.',
-      properties: { group_id: { type: 'integer', minimum: 1 } }, required: ['group_id'] },
+    {
+      action: 'create_group' as const,
+      name: 'photoshop_create_group',
+      description:
+        'Create an empty group when layer_ids is omitted, or group sibling layer_ids in existing stack order. Preserves individual visibility. Noncontiguous layers become contiguous inside the group. parent_group_id selects a containing group.',
+      properties: {
+        name: { type: 'string' },
+        layer_ids: idList,
+        parent_group_id: { type: 'integer', minimum: 1 },
+      },
+      required: [],
+    },
+    {
+      action: 'move_layers_to_group' as const,
+      name: 'photoshop_move_layers_to_group',
+      description:
+        'Move sibling layer_ids to the top of group_id, preserving their relative stack order and individual visibility. Rejects cyclic nesting.',
+      properties: { group_id: { type: 'integer', minimum: 1 }, layer_ids: idList },
+      required: ['group_id', 'layer_ids'],
+    },
+    {
+      action: 'ungroup' as const,
+      name: 'photoshop_ungroup',
+      description:
+        'Remove a group and move children to its parent in stack order. Removes group compositing, effects, masks and visibility inheritance, so appearance can change. Artboards are rejected.',
+      properties: { group_id: { type: 'integer', minimum: 1 } },
+      required: ['group_id'],
+    },
   ];
   return operations.map(({ action, name, description, properties, required }) => ({
     tool: {
       name,
-      description: description + ' Preconditions: active document. On execution failure restores the document history checkpoint when available.',
+      description:
+        description +
+        ' Preconditions: active document. On execution failure restores the document history checkpoint when available.',
       inputSchema: { type: 'object' as const, properties, required, additionalProperties: false },
     },
     handler: async (args) => {
@@ -146,7 +186,9 @@ export function createGroupTools(connection: PhotoshopConnection): ToolDefinitio
         const result = parseSnippetResult(await runSnippet(connection, groupScript(action, args)));
         if (!result) throw new Error('Invalid group result');
         return atomicSuccess('Group operation completed', result);
-      } catch (error) { return atomicFailureFromError(error); }
+      } catch (error) {
+        return atomicFailureFromError(error);
+      }
     },
   }));
 }

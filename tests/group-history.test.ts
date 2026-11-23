@@ -21,7 +21,7 @@ describe('visibility preservation on ID activation', () => {
   });
 
   it('exposes IDs for selection, text and filters without requiring the legacy selection name', () => {
-    for (const name of ['photoshop_select_layer_by_name', 'photoshop_set_text_font', 'photoshop_apply_gaussian_blur']) {
+    for (const name of ['photoshop_select_layer_by_name', 'photoshop_set_text_style', 'photoshop_apply_gaussian_blur']) {
       const tool = withOptionalLayerId({ name, inputSchema: { type: 'object', required: name.includes('select_') ? ['name'] : [] } });
       expect(tool.inputSchema.properties).toHaveProperty('layer_id');
       if (name.includes('select_')) expect(tool.inputSchema.required).not.toContain('name');
@@ -60,9 +60,8 @@ describe('history rollback', () => {
 
 describe('group input validation', () => {
   it('rejects invalid and repeated layer IDs', () => {
-    expect(() => groupScript('group_layers', { layer_ids: [] })).toThrow();
-    expect(() => groupScript('group_layers', { layer_ids: [1, 1] })).toThrow();
-    expect(() => groupScript('group_layers', { layer_ids: [0] })).toThrow();
+    expect(() => groupScript('create_group', { layer_ids: [1, 1] })).toThrow();
+    expect(() => groupScript('create_group', { layer_ids: [0] })).toThrow();
     expect(() => groupScript('ungroup', {})).toThrow();
     expect(() => groupScript('create_group', { parent_group_id: 1.2 })).toThrow();
   });

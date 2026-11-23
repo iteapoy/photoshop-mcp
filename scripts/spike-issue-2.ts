@@ -163,8 +163,8 @@ async function main(): Promise<void> {
   const createLayer = await callTool(client, 'photoshop_create_layer', { name: 'MCP_Spike_Paint' });
   assert(!createLayer.isError, 'photoshop_create_layer');
   await callTool(client, 'photoshop_fill_layer', { red: 100, green: 150, blue: 200 });
-  const curves = await callTool(client, 'photoshop_adjust_curves', { preset: 'auto_tone' });
-  assert(!curves.isError, 'photoshop_adjust_curves');
+  const curves = await callTool(client, 'photoshop_create_adjustment_layer', { type: 'curves', params: { preset: 'auto_tone' } });
+  assert(!curves.isError, 'photoshop_create_adjustment_layer');
 
   // Step 5
   console.log('\n--- Step 5: get_layers ---');

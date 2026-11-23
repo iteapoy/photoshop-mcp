@@ -35,7 +35,7 @@ export const colorCorrectTemplate: PhotoshopPromptTemplate = {
       `1. Call \`photoshop_get_state\` to confirm an active document and raster layer.`,
       `2. Call \`photoshop_get_preview\` if you have not seen the image this session.`,
       correctionStep,
-      `4. Prefer \`photoshop_adjust_curves\` for S-curve / targeted tone; chain auto levels then brightness/contrast if curves is unavailable or still flat.`,
+      `4. Prefer \`photoshop_create_adjustment_layer\` with type=curves for S-curve / targeted tone; chain auto levels then brightness/contrast if curves is unavailable or still flat.`,
       `5. Call \`photoshop_get_preview\` once after correction.`,
       `6. For stylistic looks (cinematic, teal-orange), use \`photoshop_recipe_apply_color_grade\` instead — this guide is for neutral correction only.`,
       ``,

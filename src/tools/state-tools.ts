@@ -48,12 +48,23 @@ export function createStateTools(connection: PhotoshopConnection): ToolDefinitio
         description:
           'Return a cheap read-only snapshot of Photoshop session state (active document, layer, selection).\n\n' +
           'Use when: before any tool that needs an active document/layer, or after an error to recover context.\n' +
-          'Do NOT use when: you only need a visual preview — use photoshop_get_preview instead.\n\n' +
-          'Returns: JSON with hasDocument, openDocumentCount, documents[] (id, name, width, height, saved, is_active for every open file), document (id, name, path, saved, width, height, resolution, colorMode, bitsPerChannel, layerCount, layers[] up to 40 top-level layers, artboards), activeLayer, activeArtboard, hasSelection. path is omitted until the file has been saved. Capture document.id and pass it as document_id on later mutating calls. Artboard ids come from document.artboards[].id.\n' +
+          'Do NOT use when: you only need a visual preview — use photoshop_get_preview instead.\n' +
+          'Do NOT use when: you need the full list of open tabs — use photoshop_list_documents (or include_documents=true).\n\n' +
+          'Returns: JSON with hasDocument, openDocumentCount, document (id, name, path, saved, width, height, resolution, colorMode, bitsPerChannel, layerCount, layers[] up to 40 top-level layers, artboards), activeLayer, activeArtboard, hasSelection. documents[] (every open tab) is only included with include_documents=true — the default keeps the payload small when dozens of files are open. path is omitted until the file has been saved. Capture document.id and pass it as document_id on later mutating calls. Artboard ids come from document.artboards[].id.\n' +
           'Preconditions: none (safe on empty session). Side effects: none.',
-        inputSchema: { type: 'object', properties: {} },
+        inputSchema: {
+          type: 'object',
+          properties: {
+            include_documents: {
+              type: 'boolean',
+              description:
+                'Also list every open document (id, name, width, height, saved, is_active). Default false; this list grows with each open tab.',
+              default: false,
+            },
+          },
+        },
       },
-      handler: async () => getState(connection),
+      handler: async (args) => getState(connection, args),
     },
     {
       tool: {
@@ -115,9 +126,13 @@ export function createStateTools(connection: PhotoshopConnection): ToolDefinitio
   ];
 }
 
-async function getState(connection: PhotoshopConnection): Promise<ToolResult> {
+async function getState(
+  connection: PhotoshopConnection,
+  args: Record<string, unknown> = {}
+): Promise<ToolResult> {
+  const includeDocuments = args.include_documents === true;
   try {
-    const raw = await runScript(connection, ExtendScriptSnippets.getState());
+    const raw = await runScript(connection, ExtendScriptSnippets.getState(includeDocuments));
     const result = parseExtendScriptPayload(raw);
     return {
       content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],

@@ -67,7 +67,7 @@ export function createLayerTools(connection: PhotoshopConnection): ToolDefinitio
           'Do NOT use when: editing existing text — use photoshop_update_text_content / photoshop_set_text_style.\n' +
           'Do NOT use execute_script for tracking/leading/box — pass those fields here.\n\n' +
           'Returns: JSON { ok, summary, details: { layerName, text, style, context } }.\n' +
-          'Use photoshop_list_fonts to discover font names; photoshop_set_text_font / photoshop_set_text_style to change later.\n' +
+          'Use photoshop_list_fonts to discover font names; photoshop_set_text_style to change later.\n' +
           'Preconditions: active document. Side effects: adds text layer.',
         inputSchema: {
           type: 'object',
@@ -170,7 +170,7 @@ export function createLayerTools(connection: PhotoshopConnection): ToolDefinitio
           'Do NOT use when: a new empty layer is needed first — use photoshop_create_layer, then this.\n' +
           'Do NOT use when: the fill should be a two-color gradient — use photoshop_fill_gradient.\n' +
           'Do NOT use when: the selection should be filled with surrounding content — use photoshop_content_aware_fill.\n' +
-          'Do NOT use when: the active layer is text — rasterize with photoshop_rasterize_layer first, or recolor type with photoshop_set_text_color.\n' +
+          'Do NOT use when: the active layer is text — rasterize with photoshop_rasterize_layer first, or recolor type with photoshop_set_text_style.\n' +
           'A smart object is rasterized in place and then filled. No extra layer is created.\n\n' +
           'Returns: the RGB color applied.\n' +
           'Preconditions: active document and an unlocked non-text layer. Side effects: overwrites those pixels. The same color on the same pixels is idempotent. Reversible with photoshop_undo.',
@@ -263,14 +263,21 @@ export function createLayerTools(connection: PhotoshopConnection): ToolDefinitio
           'List all layers recursively with id, parent_id, depth, kind, pixel bounds, visibility, and opacity.\n\n' +
           'Use when: choosing a layer to edit, debugging structure, or after organize_layers.\n' +
           'Do NOT use when: only session summary is needed — use photoshop_get_state (lighter).\n\n' +
-          'Returns: plain JSON with recursive layerCount/total_layer_count, root_layer_count, layers array, and context. context.document.layerCount counts root layers.\n' +
+          'Returns: plain JSON with recursive layerCount/total_layer_count, root_layer_count, and layers[]. Add include_context=true to append the full session context block (same shape as photoshop_get_state); it is omitted by default so large documents stay cheap.\n' +
           'Preconditions: active document. Side effects: none.',
         inputSchema: {
           type: 'object',
-          properties: {},
+          properties: {
+            include_context: {
+              type: 'boolean',
+              description:
+                'Append the session context (document + active layer + selection) of photoshop_get_state. Default false.',
+              default: false,
+            },
+          },
         },
       },
-      handler: async () => getLayers(connection),
+      handler: async (args) => getLayers(connection, args),
     },
     {
       tool: {
@@ -513,12 +520,15 @@ async function fillGradient(
   }
 }
 
-async function getLayers(connection: PhotoshopConnection): Promise<ToolResult> {
+async function getLayers(
+  connection: PhotoshopConnection,
+  args: Record<string, unknown> = {}
+): Promise<ToolResult> {
   try {
     const apiFactory = new PhotoshopAPIFactory(connection);
     const api = await apiFactory.createAPI();
 
-    const script = ExtendScriptSnippets.getLayerNames();
+    const script = ExtendScriptSnippets.getLayerNames(args.include_context === true);
     const result = await api.executeScript(script);
 
     return {

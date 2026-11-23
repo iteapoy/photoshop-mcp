@@ -182,7 +182,7 @@ for (const marker of [
   'photoshop_recipe_sky_blend',
   'photoshop_recipe_remove_distraction',
   'photoshop_recipe_dodge_burn',
-  'photoshop_adjust_curves',
+  'photoshop_create_adjustment_layer',
   'photoshop_generative_remove',
   'photoshop_sky_replacement',
   'photoshop_neural_filter',

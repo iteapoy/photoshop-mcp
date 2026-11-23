@@ -1,6 +1,6 @@
 # photoshop-mcp
 
-> MCP server for Adobe Photoshop — 1.7.18 — 122 tools (generative AI + 16 recipes), standalone web UI, and state-aware agent workflows. Unofficial; not affiliated with Adobe.
+> MCP server for Adobe Photoshop — 1.7.18 — 132 tools (generative AI + 17 recipes), standalone web UI, and state-aware agent workflows. Unofficial; not affiliated with Adobe.
 
 **Website:** https://photoshop-mcp.com/
 **llms.txt (site):** https://photoshop-mcp.com/llms.txt
@@ -48,8 +48,8 @@ claude mcp add photoshop -- npx -y @alisaitteke/photoshop-mcp
 
 ## Tool surface
 
-- **122 tools** — 106 atomic + 16 recipe (`photoshop_recipe_*`)
-- **23 MCP prompts** — `ps.remove_background`, `ps.enhance_portrait`, `ps.generative_fill`, …
+- **132 tools** — 115 atomic + 17 recipe (`photoshop_recipe_*`)
+- **24 MCP prompts** — `ps.remove_background`, `ps.enhance_portrait`, `ps.generative_fill`, …
 - **Generative AI** — fill, remove, expand, upscale, sky replacement, generate image (Adobe account)
 - **State** — `photoshop_get_state`, `photoshop_get_preview`, `photoshop_get_capabilities`
 - **Standalone UI** — Action Plan (beta): plan all steps in one LLM call, then execute
@@ -74,3 +74,10 @@ claude mcp add photoshop -- npx -y @alisaitteke/photoshop-mcp
 - [Development](https://photoshop-mcp.com/docs/development/)
 - [Troubleshooting](https://photoshop-mcp.com/docs/troubleshooting/)
 - [AGENTS.md](https://github.com/alisaitteke/photoshop-mcp/blob/master/AGENTS.md)
+
+## Canonical tool entry points
+
+Use `photoshop_create_adjustment_layer` with `type`/`params` for editable tonal
+adjustments, `photoshop_set_text_style` for font/color/alignment,
+`photoshop_reorder_layer` for stacking order, and `photoshop_create_group` with
+optional `layer_ids` for empty or populated groups. The former individual tool names have been removed; use these canonical entry points.

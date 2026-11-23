@@ -18,7 +18,7 @@ User intent glossary
 - sky.replace — "replace sky", "fix blown sky", "better clouds" → `photoshop_sky_replacement` when `sky_replacement_native`; else `photoshop_recipe_sky_blend`; guide `ps.composite_blend` for manual composite
 - portrait.enhance — "smooth skin", "retouch portrait", "fix blemishes" → `photoshop_recipe_enhance_portrait`
 - portrait.freq_sep — "frequency separation", "split texture and color" → `photoshop_recipe_frequency_separation`
-- color.correct — "make it pop", "S-curve", "fix flat image", "auto tone" → `photoshop_adjust_curves`; fallback `photoshop_auto_levels` then `photoshop_adjust_brightness_contrast`; guide `ps.color_correct`
+- color.correct — "make it pop", "S-curve", "fix flat image", "auto tone" → `photoshop_create_adjustment_layer` with `type: "curves"`; fallback `photoshop_auto_levels` then `photoshop_adjust_brightness_contrast`; guide `ps.color_correct`
 - color.grade — "cinematic", "teal orange", "moody grade" → `photoshop_recipe_apply_color_grade`
 - light.dodge_burn — "dodge and burn", "sculpt light", "lighten face" → `photoshop_recipe_dodge_burn`; guide `ps.dodge_burn_guide` for atomic setup
 - export.social — "for Instagram", "web export" → `photoshop_recipe_export_social_variants` or `photoshop_recipe_prepare_for_web`

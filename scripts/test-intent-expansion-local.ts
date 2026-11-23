@@ -197,7 +197,7 @@ async function main(): Promise<void> {
   await call(client, 'atomic', 'photoshop_execute_script', {
     code: `var doc=app.activeDocument; for(var i=0;i<doc.artLayers.length;i++){var L=doc.artLayers[i]; if(L.name.indexOf('Subject')>=0){doc.activeLayer=L;break;}} return {active:doc.activeLayer.name,kind:String(doc.activeLayer.kind)};`,
   });
-  await call(client, 'atomic', 'photoshop_adjust_curves', { preset: 'auto_tone' });
+  await call(client, 'atomic', 'photoshop_create_adjustment_layer', { type: 'curves', params: { preset: 'auto_tone' } });
   await call(client, 'atomic', 'photoshop_undo', { steps: 1 });
 
   // Content-aware fill edits the active layer's pixels — use Background (recipe path validated this).
@@ -265,7 +265,7 @@ async function main(): Promise<void> {
     'photoshop_apply_gradient_mask',
   ]);
   await getPrompt(client, 'guide-prompt', 'ps.color_correct', { preset: 'auto_tone' }, [
-    'photoshop_adjust_curves',
+    'photoshop_create_adjustment_layer',
   ]);
   await getPrompt(client, 'guide-prompt', 'ps.dodge_burn_guide', {}, [
     'photoshop_recipe_dodge_burn',

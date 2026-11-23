@@ -15,7 +15,7 @@
 
 **Prerequisites:** Photoshop running on Windows or macOS, Node.js 18+. This is unofficial and not affiliated with Adobe.
 
-**Tool surface:** 144 MCP tools — 127 atomic `photoshop_*` + 17 recipe `photoshop_recipe_*`; 24 MCP prompt templates (`ps.*`).
+**Tool surface:** 132 MCP tools — 115 atomic `photoshop_*` + 17 recipe `photoshop_recipe_*`; 24 MCP prompt templates (`ps.*`).
 
 ## Architecture (agent view)
 
@@ -56,6 +56,9 @@ Follow the server `instructions` advertised on MCP `initialize` ([src/prompts/in
 | Version / feature check | `photoshop_get_capabilities` |
 | Tracking, leading, paragraph box | `photoshop_set_text_style` (or those fields on `photoshop_create_text_layer`) |
 | Mixed fonts/colors in one text layer | `photoshop_set_text_ranges` |
+| Read existing type (content, font, size, tracking) | `photoshop_get_text` |
+| Align, even spacing, ring/step arrays | `photoshop_align_layers`, `photoshop_distribute_layers`, `photoshop_duplicate_array` |
+| One layer out as its own file | `photoshop_export_layer` |
 
 Full catalog: [docs/available-tools.md](docs/available-tools.md). Prompt layer: [docs/prompt-layer.md](docs/prompt-layer.md).
 

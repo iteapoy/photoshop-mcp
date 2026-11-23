@@ -1,22 +1,7 @@
 import { ToolDefinition, ToolResult } from '../core/tool-registry.js';
 import { PhotoshopConnection } from '../platform/connection.js';
 import { PhotoshopAPIFactory } from '../api/photoshop-api.js';
-import { ExtendScriptSnippets, type CurvesPreset } from '../api/extendscript.js';
-import {
-  atomicFailureFromError,
-  atomicSuccess,
-  parseSnippetResult,
-  runSnippet,
-} from './atomic-shared.js';
-
-const CURVES_PRESETS: CurvesPreset[] = ['auto_tone', 'neutral'];
-
-function parseCurvesPreset(value: unknown): CurvesPreset {
-  if (typeof value === 'string' && CURVES_PRESETS.includes(value as CurvesPreset)) {
-    return value as CurvesPreset;
-  }
-  return 'auto_tone';
-}
+import { ExtendScriptSnippets } from '../api/extendscript.js';
 
 export function createAdjustmentTools(connection: PhotoshopConnection): ToolDefinition[] {
   return [
@@ -27,8 +12,8 @@ export function createAdjustmentTools(connection: PhotoshopConnection): ToolDefi
           'Apply Image > Adjustments > Brightness/Contrast once to the active layer. Values are deltas on pixels, not an adjustment layer.\n\n' +
           'Users often say: fix exposure, add contrast, brighten, darken.\n\n' +
           'Use when: a quick brightness/contrast pass on the current raster layer.\n' +
-          'Do NOT use when: exposure in stops on an editable layer — use photoshop_adjust_exposure.\n' +
-          'Do NOT use when: a non-destructive tonal curve — use photoshop_adjust_curves.\n' +
+          'Do NOT use when: exposure in stops on an editable layer — use photoshop_create_adjustment_layer with type=exposure.\n' +
+          'Do NOT use when: a non-destructive tonal curve — use photoshop_create_adjustment_layer with type=curves.\n' +
           'Do NOT use when: automatic black and white points — use photoshop_auto_levels.\n\n' +
           'Returns: the brightness and contrast values applied.\n' +
           'Preconditions: active document and active layer. Text and Smart Objects are rasterized first. Side effects: destructive pixels, one history step. Calling again applies another delta. Reversible with photoshop_undo.',
@@ -59,7 +44,7 @@ export function createAdjustmentTools(connection: PhotoshopConnection): ToolDefi
         description:
           'Shift hue, saturation, and lightness on the active layer via Image > Adjustments > Hue/Saturation. Values are applied once to pixels, not stored as an adjustment layer.\n\n' +
           'Use when: a direct color shift on the current layer is enough.\n' +
-          'Do NOT use when: the change must stay editable — use photoshop_adjust_vibrance or photoshop_adjust_curves.\n' +
+          'Do NOT use when: the change must stay editable — use photoshop_create_adjustment_layer with type=vibrance or type=curves.\n' +
           'Do NOT use when: the user wants a cinematic grade — use photoshop_recipe_apply_color_grade.\n\n' +
           'Returns: the hue, saturation, and lightness that were applied.\n' +
           'Preconditions: active document and active layer. Text and Smart Objects are rasterized first, and a non-Normal blend mode is reset to Normal. Side effects: destructive pixel edit, one history step. Reversible with photoshop_undo.',
@@ -99,7 +84,7 @@ export function createAdjustmentTools(connection: PhotoshopConnection): ToolDefi
           'Use when: a one-shot automatic level fix on the current layer.\n' +
           'Do NOT use when: only contrast should move — use photoshop_auto_contrast.\n' +
           'Do NOT use when: you want a specific brightness and contrast delta — use photoshop_adjust_brightness_contrast.\n' +
-          'Do NOT use when: the correction must stay an editable adjustment layer — use photoshop_adjust_curves.\n\n' +
+          'Do NOT use when: the correction must stay an editable adjustment layer — use photoshop_create_adjustment_layer with type=curves.\n\n' +
           'Returns: confirmation that Auto Levels ran.\n' +
           'Preconditions: active document and active layer. Text and Smart Objects are rasterized first. Side effects: destructive pixels, one history step. Reversible with photoshop_undo.',
         inputSchema: {
@@ -117,7 +102,7 @@ export function createAdjustmentTools(connection: PhotoshopConnection): ToolDefi
           'Use when: a one-shot automatic contrast fix on the current layer.\n' +
           'Do NOT use when: you need numeric brightness and contrast — use photoshop_adjust_brightness_contrast.\n' +
           'Do NOT use when: black, white, and gray points should move — use photoshop_auto_levels.\n' +
-          'Do NOT use when: a non-destructive curve — use photoshop_adjust_curves.\n\n' +
+          'Do NOT use when: a non-destructive curve — use photoshop_create_adjustment_layer with type=curves.\n\n' +
           'Returns: confirmation that Auto Contrast ran.\n' +
           'Preconditions: active document and active layer. Text and Smart Objects are rasterized first. Side effects: destructive pixels, one history step. Reversible with photoshop_undo.',
         inputSchema: {
@@ -126,30 +111,6 @@ export function createAdjustmentTools(connection: PhotoshopConnection): ToolDefi
         },
       },
       handler: async () => autoContrast(connection),
-    },
-    {
-      tool: {
-        name: 'photoshop_adjust_curves',
-        description:
-          'Create a Curves adjustment layer on the active document.\n\n' +
-          'Users often say: make it pop, S-curve, fix flat image, auto tone, improve contrast.\n\n' +
-          'Use when: global tonal correction via a non-destructive Curves adjustment layer.\n' +
-          'Do NOT use when: stylistic cinematic grade — use photoshop_recipe_apply_color_grade.\n\n' +
-          'Returns: JSON { ok, summary, details: { layer_name, preset } }.\n' +
-          'Preconditions: active document. Side effects: adds Curves adjustment layer.',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            preset: {
-              type: 'string',
-              enum: CURVES_PRESETS,
-              description: 'auto_tone (S-curve) or neutral (identity curve)',
-              default: 'auto_tone',
-            },
-          },
-        },
-      },
-      handler: async (args) => adjustCurves(connection, args),
     },
     {
       tool: {
@@ -273,31 +234,6 @@ async function autoLevels(connection: PhotoshopConnection): Promise<ToolResult> 
       ],
       isError: true,
     };
-  }
-}
-
-async function adjustCurves(
-  connection: PhotoshopConnection,
-  args: Record<string, unknown>
-): Promise<ToolResult> {
-  const preset = parseCurvesPreset(args.preset);
-
-  try {
-    const raw = await runSnippet(connection, ExtendScriptSnippets.adjustCurves(preset));
-    const parsed = parseSnippetResult(raw);
-    if (!parsed) {
-      return atomicFailureFromError(new Error(`Snippet returned unparseable payload: ${String(raw)}`));
-    }
-
-    const layerName =
-      typeof parsed.layer_name === 'string' ? parsed.layer_name : 'Curves adjustment layer';
-    return atomicSuccess(`Curves adjustment layer created (${preset})`, {
-      layer_name: layerName,
-      preset,
-      ...parsed,
-    });
-  } catch (error) {
-    return atomicFailureFromError(error);
   }
 }
 

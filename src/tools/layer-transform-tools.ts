@@ -68,7 +68,7 @@ export function createLayerTransformTools(connection: PhotoshopConnection): Tool
         description:
           'Move a layer by a pixel offset. Pass layer_name to target a layer directly, otherwise the active layer is used.\n\n' +
           'Use when: nudging a layer into place (e.g. after measuring a bounds offset).\n' +
-          'Do NOT use when: the layer needs to be reordered in the stack — use photoshop_move_layer_up / _down / _to_top / _to_bottom.\n\n' +
+          'Do NOT use when: the layer needs to be reordered in the stack — use photoshop_reorder_layer.\n\n' +
           'Returns: deltaX, deltaY and the resolved layerName.\n' +
           'Preconditions: active document and one non-background layer. Side effects: pixel offset; not idempotent. Reversible with photoshop_undo.',
         inputSchema: {

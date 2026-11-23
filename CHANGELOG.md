@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Breaking:** remove 18 redundant MCP entry points and all compatibility discovery/routing for them. Use `create_adjustment_layer` (`type`/`params`), `set_text_style`, `reorder_layer`, and `create_group` (optional `layer_ids`). Both stdio and grouped HTTP now expose only 132 registered tools; old names are rejected. Adjustment schemas and handlers are defined directly per type instead of being derived from retired tool definitions.
+
 - HTTP bridge: one calling convention instead of two. `photoshop_call` now takes `{ tool, params }` — the same key as a group tool — and a single `extractCall()` backs both entry points, so `params`/`arguments`/`args` and flat siblings all resolve the same way. The flat 120-tool surface is gone (no `--flat`, no `"enabled": false`): the grouped surface is the only shape the bridge exposes, and an unknown tool name now returns the group list instead of silently forwarding.
 
 ### Fixed

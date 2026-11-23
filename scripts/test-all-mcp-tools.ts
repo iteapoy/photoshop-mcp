@@ -488,14 +488,14 @@ async function main(): Promise<void> {
   await t.run('photoshop_set_active_document', { index: 0 });
 
   console.log('\n=== Phase 5: Layer ordering ===');
-  await t.run('photoshop_move_layer_up');
-  await t.run('photoshop_move_layer_down');
-  await t.run('photoshop_move_layer_to_top');
-  await t.run('photoshop_move_layer_to_position', {
-    targetLayerName: 'MCP_Paint_Renamed',
-    position: 'ABOVE',
+  await t.run('photoshop_reorder_layer', { position: 'up' });
+  await t.run('photoshop_reorder_layer', { position: 'down' });
+  await t.run('photoshop_reorder_layer', { position: 'top' });
+  await t.run('photoshop_reorder_layer', {
+    target_layer_name: 'MCP_Paint_Renamed',
+    position: 'above',
   });
-  await t.run('photoshop_move_layer_to_bottom');
+  await t.run('photoshop_reorder_layer', { position: 'bottom' });
 
   console.log('\n=== Phase 6: Selection & masks ===');
   await t.run('photoshop_execute_script', {
@@ -734,7 +734,7 @@ async function main(): Promise<void> {
   await t.run('photoshop_adjust_hue_saturation', { hue: 5, saturation: 5, lightness: 0 });
   await t.run('photoshop_auto_levels');
   await t.run('photoshop_auto_contrast');
-  await t.run('photoshop_adjust_curves', { preset: 'auto_tone' });
+  await t.run('photoshop_create_adjustment_layer', { type: 'curves', params: { preset: 'auto_tone' } });
   await t.run('photoshop_select_layer_by_name', { name: 'MCP_Paint_Renamed copy' });
   await t.run('photoshop_desaturate');
   await t.run('photoshop_invert');
@@ -757,7 +757,7 @@ async function main(): Promise<void> {
   await t.run('photoshop_execute_script', {
     code: `for (var i = 0; i < app.activeDocument.artLayers.length; i++) { var L = app.activeDocument.artLayers[i]; if (L.kind == LayerKind.TEXT) { app.activeDocument.activeLayer = L; break; } } return { active: app.activeDocument.activeLayer.name };`,
   });
-  await t.run('photoshop_set_text_font', { fontName: 'Arial', fontSize: 32 });
+  await t.run('photoshop_set_text_style', { fontName: 'Arial', fontSize: 32 });
   await t.run('photoshop_create_text_layer', {
     text: 'MCP Arial',
     x: 160,
@@ -765,8 +765,8 @@ async function main(): Promise<void> {
     fontSize: 20,
     fontName: 'Arial',
   });
-  await t.run('photoshop_set_text_color', { red: 10, green: 10, blue: 200 });
-  await t.run('photoshop_set_text_alignment', { alignment: 'CENTER' });
+  await t.run('photoshop_set_text_style', { red: 10, green: 10, blue: 200 });
+  await t.run('photoshop_set_text_style', { alignment: 'CENTER' });
   await t.run('photoshop_update_text_content', { text: 'MCP Updated' });
   await t.run('photoshop_set_text_style', {
     tracking: 80,

@@ -55,7 +55,7 @@ describe('tool annotations', () => {
     const names = [...descriptions.keys()].sort();
     const annotated = Object.keys(TOOL_ANNOTATIONS).sort();
     expect(annotated).toEqual(names);
-    expect(names).toHaveLength(144);
+    expect(names).toHaveLength(132);
   });
 
   it('keeps read-only tools non-destructive', () => {
@@ -100,8 +100,6 @@ describe('tool annotations', () => {
       'photoshop_apply_sharpen',
       'photoshop_adjust_hue_saturation',
       'photoshop_set_layer_locked',
-      'photoshop_set_text_alignment',
-      'photoshop_move_layer_to_position',
       'photoshop_adjust_brightness_contrast',
       'photoshop_apply_layer_mask',
       'photoshop_apply_motion_blur',
@@ -121,10 +119,9 @@ describe('tool annotations', () => {
       'photoshop_scale_layer',
       'photoshop_select_all',
       'photoshop_set_layer_opacity',
-      'photoshop_set_text_color',
       'photoshop_update_text_content',
     ];
-    expect(weak).toHaveLength(31);
+    expect(weak).toHaveLength(28);
     for (const name of weak) {
       const description = descriptions.get(name);
       expect(description, name).toBeTruthy();

@@ -14,15 +14,8 @@ function cTID(s) { return app.charIDToTypeID(s); }
 function sTID(s) { return app.stringIDToTypeID(s); }
 `;
 
-/**
- * Layer targeting helpers.
- *
- * Layer-property snippets used to act on `doc.activeLayer` only, so callers had
- * to select a layer first (and silently edited the wrong layer when they
- * forgot). `__mcp_resolveLayer` addresses a layer by name without touching the
- * active layer, which removes that extra round trip.
- */
-const layerTargetHelpers = `
+/** Exact name lookup shared by layer and Smart Object snippets. */
+const findLayerHelper = `
 function __mcp_findLayer(container, name) {
   if (!container || !name) return null;
   var matches = [];
@@ -37,6 +30,18 @@ function __mcp_findLayer(container, name) {
   if (matches.length > 1) throw new Error('ambiguous_name: multiple layers named "' + name + '"; use layer_id');
   return matches.length ? matches[0] : null;
 }
+`;
+
+/**
+ * Layer targeting helpers.
+ *
+ * Layer-property snippets used to act on `doc.activeLayer` only, so callers had
+ * to select a layer first (and silently edited the wrong layer when they
+ * forgot). `__mcp_resolveLayer` addresses a layer by name without touching the
+ * active layer, which removes that extra round trip.
+ */
+const layerTargetHelpers = `
+${findLayerHelper}
 
 function __mcp_findPath(container, name, chain) {
   if (!container) return null;
@@ -964,30 +969,12 @@ function __mcp_c2t(s) { return cTID(s); }
 `;
 
 /**
- * Layer mask helpers — Adobe Community / StackSupport.jsx patterns.
- * @see https://community.adobe.com/t5/photoshop-ecosystem-discussions/is-it-possible-to-make-a-layer-mask-with-the-current-selection-using-extendscript/td-p/10872052
- * @see https://github.com/LeZuse/photoshop-scripts/blob/master/default/Stack%20Scripts%20Only/StackSupport.jsx
- */
-/**
  * Smart Object helpers — newPlacedLayer, placedLayerReplaceContents, placedLayerEditContents,
  * placedLayerMakeCopy (Adobe Community, Photopea, laryn gist, c.pfaffenbichler).
  * Requires `helperFunctions` (cTID/sTID) in the enclosing script.
  */
 export const MCP_SMART_OBJECT_HELPERS = `
-function __mcp_findLayer(container, name) {
-  if (!container || !name) return null;
-  var matches = [];
-  function scan(node) {
-    for (var i = 0; i < node.layers.length; i++) {
-      var layer = node.layers[i];
-      if (String(layer.name) === String(name)) matches.push(layer);
-      if (layer.typename === 'LayerSet') scan(layer);
-    }
-  }
-  scan(container);
-  if (matches.length > 1) throw new Error('ambiguous_name: multiple layers named "' + name + '"; use layer_id');
-  return matches.length ? matches[0] : null;
-}
+${findLayerHelper}
 
 function __mcp_activateLayerByName(layerName) {
   var doc = app.activeDocument;
@@ -1164,21 +1151,66 @@ export type CurvesPreset = 'auto_tone' | 'neutral';
 export type GradientMaskDirection =
   'top_to_bottom' | 'bottom_to_top' | 'left_to_right' | 'right_to_left';
 
-/**
- * Common ExtendScript snippets
- */
-export const ExtendScriptSnippets = {
-  /**
-   * Get Photoshop application info
-   */
-  getAppInfo: () => `
-    return {
-      name: app.name,
-      version: app.version,
-      build: app.build
-    };
-  `,
+/** Roll back a failed layout operation, including copies created before a failure. */
+function withLayoutRollback(script: string): string {
+  return `
+    if (!app.documents.length) throw new Error('No active document');
+    var __mcp_layoutDoc = app.activeDocument;
+    var __mcp_layoutBaseline = __mcp_layoutDoc.activeHistoryState;
+    var __mcp_layoutActiveId = __mcp_layoutDoc.activeLayer.id;
+    var __mcp_layoutVisibility = [];
+    function __mcp_layoutCollect(container) {
+      for (var i = 0; i < container.layers.length; i++) {
+        var layer = container.layers[i];
+        __mcp_layoutVisibility.push({ id: layer.id, visible: layer.visible });
+        if (layer.typename === 'LayerSet') __mcp_layoutCollect(layer);
+      }
+    }
+    function __mcp_layoutFind(container, id) {
+      for (var i = 0; i < container.layers.length; i++) {
+        var layer = container.layers[i];
+        if (layer.id === id) return layer;
+        if (layer.typename === 'LayerSet') {
+          var found = __mcp_layoutFind(layer, id);
+          if (found) return found;
+        }
+      }
+      return null;
+    }
+    function __mcp_assertLayoutUnlocked(layer) {
+      var node = layer;
+      while (node && node.typename !== 'Document') {
+        if (node.allLocked || node.positionLocked) {
+          throw new Error('invalid_arguments: layer "' + layer.name + '" or its containing group is locked');
+        }
+        node = node.parent;
+      }
+    }
+    __mcp_layoutCollect(__mcp_layoutDoc);
+    try {
+      return (function() {
+${script}
+ })();
+    } catch (error) {
+      try {
+        __mcp_layoutDoc.activeHistoryState = __mcp_layoutBaseline;
+        var originalActive = __mcp_layoutFind(__mcp_layoutDoc, __mcp_layoutActiveId);
+        if (originalActive) __mcp_layoutDoc.activeLayer = originalActive;
+        for (var vi = 0; vi < __mcp_layoutVisibility.length; vi++) {
+          var entry = __mcp_layoutVisibility[vi];
+          var restored = __mcp_layoutFind(__mcp_layoutDoc, entry.id);
+          if (restored && restored.visible !== entry.visible) restored.visible = entry.visible;
+        }
+      } catch (rollbackError) {
+        throw new Error(error.message + ' (rollback failed: ' + rollbackError.message + ')');
+      }
+      throw error;
+    }
+  `;
+}
 
+/** Common ExtendScript snippets. */
+export const ExtendScriptSnippets = {
   /**
    * Create a new document
    */
@@ -2021,7 +2053,7 @@ export const ExtendScriptSnippets = {
   /**
    * Get all layer names
    */
-  getLayerNames: () => `
+  getLayerNames: (includeContext = false) => `
     ${helperFunctions}
     ${artboardHelpers}
     ${getContextInfo}
@@ -2074,10 +2106,12 @@ export const ExtendScriptSnippets = {
       total_layer_count: layers.length,
       root_layer_count: doc.layers.length,
       bounds_unit: 'px',
-      count_semantics: { layerCount: 'recursive_including_groups', 'context.document.layerCount': 'root_layers_including_groups' },
-      layers: layers,
-      context: getContextInfo()
+      count_semantics: { layerCount: 'recursive_including_groups', root_layer_count: 'root_layers_including_groups' },
+      layers: layers
     };
+    if (${includeContext ? 'true' : 'false'}) {
+      result.context = getContextInfo();
+    }
     return result;
   `,
 
@@ -2930,33 +2964,6 @@ export const ExtendScriptSnippets = {
   `,
 
   /**
-   * Set text layer font
-   */
-  setTextFont: (fontName: string, fontSize?: number) => `
-    ${resolveFontPostScriptName}
-    if (app.documents.length === 0) {
-      throw new Error('No active document');
-    }
-    var layer = app.activeDocument.activeLayer;
-    
-    if (layer.kind !== LayerKind.TEXT) {
-      throw new Error('Active layer is not a text layer');
-    }
-    
-    var __psFont = resolveFontPostScriptName("${jsString(fontName)}");
-    if (!__psFont) {
-      throw new Error('font_not_found: ${jsString(fontName)}');
-    }
-    layer.textItem.font = __psFont;
-    ${fontSize ? `layer.textItem.size = ${fontSize};` : ''}
-    
-    return { 
-      font: layer.textItem.font,
-      size: layer.textItem.size
-    };
-  `,
-
-  /**
    * List installed fonts (PostScript names required for TextItem.font).
    */
   listFonts: (query?: string, limit = 200) => `
@@ -3014,50 +3021,6 @@ export const ExtendScriptSnippets = {
       } catch (e) {}
     }
     return { visible: visible, total: app.fonts.length };
-  `,
-
-  /**
-   * Set text color
-   */
-  setTextColor: (red: number, green: number, blue: number) => `
-    if (app.documents.length === 0) {
-      throw new Error('No active document');
-    }
-    var layer = app.activeDocument.activeLayer;
-    
-    if (layer.kind !== LayerKind.TEXT) {
-      throw new Error('Active layer is not a text layer');
-    }
-    
-    var color = new SolidColor();
-    color.rgb.red = ${red};
-    color.rgb.green = ${green};
-    color.rgb.blue = ${blue};
-    layer.textItem.color = color;
-    
-    return { 
-      color: 'RGB(' + ${red} + ', ' + ${green} + ', ' + ${blue} + ')'
-    };
-  `,
-
-  /**
-   * Set text alignment
-   */
-  setTextAlignment: (alignment: string) => `
-    if (app.documents.length === 0) {
-      throw new Error('No active document');
-    }
-    var layer = app.activeDocument.activeLayer;
-    
-    if (layer.kind !== LayerKind.TEXT) {
-      throw new Error('Active layer is not a text layer');
-    }
-    
-    layer.textItem.justification = Justification.${alignment};
-    
-    return { 
-      alignment: '${alignment}'
-    };
   `,
 
   /**
@@ -3948,7 +3911,7 @@ export const ExtendScriptSnippets = {
    * Move a layer to a position relative to another layer (reorder).
    * Both the moving layer and the target can be addressed by name.
    */
-  moveLayerToPosition: (targetLayerName: string, position: string, layerName = '') => `
+  moveLayerToPosition: (targetLayerName: string, position: string, layerName = '', targetLayerId?: number) => `
     ${helperFunctions}
     ${getContextInfo}
     ${layerTargetHelpers}
@@ -3960,10 +3923,26 @@ export const ExtendScriptSnippets = {
     var activeLayer = __mcp_resolveLayer(doc, "${jsString(layerName)}", 0);
     
     // Find target layer (nested groups included)
-    var targetLayer = __mcp_findLayer(doc, "${jsString(targetLayerName)}");
+    var targetLayer;
+    if (${targetLayerId !== undefined}) {
+      function findReferenceById(container) {
+        for (var i = 0; i < container.layers.length; i++) {
+          var candidate = container.layers[i];
+          if (candidate.id === ${targetLayerId ?? 0}) return candidate;
+          if (candidate.typename === 'LayerSet') {
+            var nested = findReferenceById(candidate);
+            if (nested) return nested;
+          }
+        }
+        return null;
+      }
+      targetLayer = findReferenceById(doc);
+    } else {
+      targetLayer = __mcp_findLayer(doc, "${jsString(targetLayerName)}");
+    }
     
     if (!targetLayer) {
-      throw new Error('Target layer not found: ${jsString(targetLayerName)}');
+      throw new Error('layer_not_found: reference ${targetLayerId ?? jsString(targetLayerName)}');
     }
     if (__mcp_sameLayer(activeLayer, targetLayer)) {
       throw new Error('Cannot move a layer relative to itself');
@@ -4163,7 +4142,7 @@ export const ExtendScriptSnippets = {
   /**
    * Lightweight session state snapshot (read-only).
    */
-  getState: () => `
+  getState: (includeDocuments = true) => `
     ${helperFunctions}
     ${artboardHelpers}
     ${getContextInfo}
@@ -4198,23 +4177,27 @@ export const ExtendScriptSnippets = {
       context.activeArtboard = activeAb;
     }
 
-    context.documents = [];
-    var activeId = null;
-    try {
-      if (app.documents.length > 0) activeId = app.activeDocument.id;
-    } catch (eActive) {
-      activeId = null;
-    }
-    for (var di = 0; di < app.documents.length; di++) {
-      var openDoc = app.documents[di];
-      var entry = { id: null, name: '', is_active: false };
-      try { entry.id = openDoc.id; } catch (eId) {}
-      try { entry.name = String(openDoc.name); } catch (eName) {}
-      try { entry.width = openDoc.width.as('px'); } catch (eW) {}
-      try { entry.height = openDoc.height.as('px'); } catch (eH) {}
-      try { entry.saved = openDoc.saved; } catch (eOpenSaved) {}
-      try { entry.is_active = activeId !== null && openDoc.id === activeId; } catch (eA) {}
-      context.documents.push(entry);
+    // Every open tab is a large payload on a session with dozens of documents.
+    // The list is opt-in; photoshop_list_documents returns it on demand.
+    if (${includeDocuments ? 'true' : 'false'}) {
+      context.documents = [];
+      var activeId = null;
+      try {
+        if (app.documents.length > 0) activeId = app.activeDocument.id;
+      } catch (eActive) {
+        activeId = null;
+      }
+      for (var di = 0; di < app.documents.length; di++) {
+        var openDoc = app.documents[di];
+        var entry = { id: null, name: '', is_active: false };
+        try { entry.id = openDoc.id; } catch (eId) {}
+        try { entry.name = String(openDoc.name); } catch (eName) {}
+        try { entry.width = openDoc.width.as('px'); } catch (eW) {}
+        try { entry.height = openDoc.height.as('px'); } catch (eH) {}
+        try { entry.saved = openDoc.saved; } catch (eOpenSaved) {}
+        try { entry.is_active = activeId !== null && openDoc.id === activeId; } catch (eA) {}
+        context.documents.push(entry);
+      }
     }
     return context;
   `,
@@ -4432,7 +4415,6 @@ export const ExtendScriptSnippets = {
   generativeFill: (prompt: string) => {
     const escaped = jsStringLiteral(prompt);
     return `
-      ${helperFunctions}
       ${ExtendScriptSnippets.generativeHelpers()}
 
       if (app.documents.length === 0) throw new Error('No active document');
@@ -4476,7 +4458,6 @@ export const ExtendScriptSnippets = {
   },
 
   generativeRemove: (featherPx: number, autoSelectSubject: boolean) => `
-    ${helperFunctions}
     ${ExtendScriptSnippets.generativeHelpers()}
 
     if (app.documents.length === 0) throw new Error('No active document');
@@ -4525,7 +4506,6 @@ export const ExtendScriptSnippets = {
     const escaped = jsStringLiteral(prompt);
     const dir = jsStringLiteral(direction);
     return `
-      ${helperFunctions}
       ${ExtendScriptSnippets.generativeHelpers()}
 
       if (app.documents.length === 0) throw new Error('No active document');
@@ -4559,7 +4539,6 @@ export const ExtendScriptSnippets = {
   },
 
   generativeUpscale: (targetScale: number) => `
-    ${helperFunctions}
     ${ExtendScriptSnippets.generativeHelpers()}
 
     if (app.documents.length === 0) throw new Error('No active document');
@@ -4593,7 +4572,6 @@ export const ExtendScriptSnippets = {
   skyReplacement: (skyImagePath: string) => {
     const escaped = jsStringLiteral(skyImagePath);
     return `
-      ${helperFunctions}
       ${ExtendScriptSnippets.generativeHelpers()}
 
       if (app.documents.length === 0) throw new Error('No active document');
@@ -4632,7 +4610,6 @@ export const ExtendScriptSnippets = {
   generateImage: (prompt: string, width: number, height: number) => {
     const escaped = jsStringLiteral(prompt);
     return `
-      ${helperFunctions}
       ${ExtendScriptSnippets.generativeHelpers()}
 
       app.displayDialogs = DialogModes.NO;
@@ -5447,6 +5424,487 @@ export const ExtendScriptSnippets = {
           : ''
       }
     };
+  `;
+  },
+
+  /**
+   * Read a text layer's content and typography.
+   *
+   * `all` scans the whole document for text layers, which is the only way to
+   * audit a design whose labels live in a dozen separate `字 · …` layers.
+   */
+  getText: (layerName = '', all = false) => `
+    ${helperFunctions}
+    ${layerTargetHelpers}
+    ${textStyleHelpers}
+
+    if (app.documents.length === 0) {
+      throw new Error('No active document');
+    }
+    var doc = app.activeDocument;
+
+    function __mcp_textEntry(lyr) {
+      var entry = { id: null, name: '', parent: null };
+      try { entry.id = lyr.id; } catch (eId) {}
+      try { entry.name = String(lyr.name); } catch (eName) {}
+      try { entry.parent = lyr.parent && lyr.parent.typename === 'LayerSet' ? String(lyr.parent.name) : null; } catch (eParent) {}
+      // Typography lives on layer.textItem, not on the layer itself.
+      var textItem = null;
+      try { textItem = lyr.textItem; } catch (eTextItem) {}
+      var style = __mcp_readTextStyle(textItem || lyr);
+      for (var k in style) {
+        if (style.hasOwnProperty(k)) entry[k] = style[k];
+      }
+      entry.bounds = null;
+      try {
+        var b = lyr.bounds;
+        entry.bounds = [b[0].as('px'), b[1].as('px'), b[2].as('px'), b[3].as('px')];
+      } catch (eB) {}
+      // toSource() cannot represent undefined/NaN; JSON.parse rejects both, so
+      // a missing value must surface as null.
+      for (var sk in entry) {
+        if (entry.hasOwnProperty(sk)) {
+          var value = entry[sk];
+          if (value === undefined || (typeof value === 'number' && isNaN(value))) {
+            entry[sk] = null;
+          }
+        }
+      }
+      return entry;
+    }
+
+    if (${all ? 'true' : 'false'}) {
+      var found = [];
+      function __mcp_scanTextLayers(container) {
+        for (var i = 0; i < container.layers.length; i++) {
+          var lyr = container.layers[i];
+          if (lyr.typename === 'LayerSet') {
+            __mcp_scanTextLayers(lyr);
+            continue;
+          }
+          var kind = '';
+          try { kind = String(lyr.kind); } catch (eKind) {}
+          if (kind === 'LayerKind.TEXT') found.push(__mcp_textEntry(lyr));
+        }
+      }
+      __mcp_scanTextLayers(doc);
+      return { ok: true, scope: 'document', count: found.length, layers: found };
+    }
+
+    var target = __mcp_resolveLayer(doc, "${jsString(layerName)}", 0);
+    var targetKind = '';
+    try { targetKind = String(target.kind); } catch (eTargetKind) {}
+    if (targetKind !== 'LayerKind.TEXT') {
+      throw new Error('Layer "' + target.name + '" is not a text layer (' + targetKind + ')');
+    }
+    return { ok: true, scope: 'layer', layer: __mcp_textEntry(target) };
+  `,
+
+  /**
+   * Align layers to the canvas or to a reference layer.
+   *
+   * Photoshop's DOM has no align command, and `move_layer` needs a hand-computed
+   * delta for every layer — the step that makes ring layouts drift by a pixel.
+   */
+  alignLayers: (align: string, target: string, targetLayerName: string, layerNames: string[] = []) => withLayoutRollback(`
+    ${helperFunctions}
+    ${layerTargetHelpers}
+
+    if (app.documents.length === 0) {
+      throw new Error('No active document');
+    }
+    var doc = app.activeDocument;
+
+    function __mcp_boundsOf(layer) {
+      var b = layer.bounds;
+      return {
+        left: b[0].as('px'),
+        top: b[1].as('px'),
+        right: b[2].as('px'),
+        bottom: b[3].as('px'),
+        width: b[2].as('px') - b[0].as('px'),
+        height: b[3].as('px') - b[1].as('px')
+      };
+    }
+
+    var names = [${layerNames.map((name) => `"${jsString(name)}"`).join(', ')}];
+    var layers = [];
+    if (names.length === 0) {
+      if (!doc.activeLayer) throw new Error('No active layer');
+      layers.push(doc.activeLayer);
+    } else {
+      for (var i = 0; i < names.length; i++) {
+        var found = __mcp_findLayer(doc, names[i]);
+        if (!found) throw new Error('layer_not_found: no layer named "' + names[i] + '"');
+        layers.push(found);
+      }
+    }
+
+    var targetRect;
+    if ('${target}' === 'canvas') {
+      targetRect = { left: 0, top: 0, right: doc.width.as('px'), bottom: doc.height.as('px') };
+    } else {
+      var targetName = "${jsString(targetLayerName)}";
+      if (!targetName) throw new Error('invalid_arguments: target_layer_name is required when target is layer');
+      var targetLayer = __mcp_findLayer(doc, targetName);
+      if (!targetLayer) throw new Error('layer_not_found: no layer named "' + targetName + '"');
+      targetRect = __mcp_boundsOf(targetLayer);
+    }
+
+    var alignMode = '${align}';
+    var moved = [];
+    var skipped = [];
+    var activeLayer = doc.activeLayer;
+    for (var check = 0; check < layers.length; check++) {
+      if (!layers[check].isBackgroundLayer) __mcp_assertLayoutUnlocked(layers[check]);
+    }
+    for (var li = 0; li < layers.length; li++) {
+      var layer = layers[li];
+      var name = '';
+      try { name = String(layer.name); } catch (eName) {}
+      var isBackground = false;
+      try { isBackground = layer.isBackgroundLayer; } catch (eBg) {}
+      if (isBackground) {
+        skipped.push({ layer: name, reason: 'background layer cannot move' });
+        continue;
+      }
+      var rect = null;
+      try { rect = __mcp_boundsOf(layer); } catch (eBounds) {
+        skipped.push({ layer: name, reason: 'layer has no pixel bounds' });
+        continue;
+      }
+      if (rect.width === 0 && rect.height === 0) {
+        skipped.push({ layer: name, reason: 'empty layer' });
+        continue;
+      }
+      var dx = 0;
+      var dy = 0;
+      if (alignMode === 'left') dx = targetRect.left - rect.left;
+      else if (alignMode === 'hcenter') dx = (targetRect.left + targetRect.right) / 2 - (rect.left + rect.right) / 2;
+      else if (alignMode === 'right') dx = targetRect.right - rect.right;
+      else if (alignMode === 'top') dy = targetRect.top - rect.top;
+      else if (alignMode === 'vcenter') dy = (targetRect.top + targetRect.bottom) / 2 - (rect.top + rect.bottom) / 2;
+      else if (alignMode === 'bottom') dy = targetRect.bottom - rect.bottom;
+      else throw new Error('invalid_arguments: unsupported align "' + alignMode + '"');
+      if (dx === 0 && dy === 0) {
+        skipped.push({ layer: name, reason: 'already aligned' });
+        continue;
+      }
+      layer.translate(new UnitValue(dx, 'px'), new UnitValue(dy, 'px'));
+      moved.push({ layer: name, dx: dx, dy: dy });
+    }
+    try { if (activeLayer) doc.activeLayer = activeLayer; } catch (eRestore) {}
+    return { ok: true, align: alignMode, target: '${target}', moved: moved, skipped: skipped };
+  `),
+
+  /**
+   * Space layers evenly along one axis.
+   *
+   * mode=gaps equalizes the gaps between neighboring edges (Photoshop's
+   * "distribute spacing"); mode=centers pins the first and last centers and
+   * spreads the centers between them.
+   */
+  distributeLayers: (axis: 'horizontal' | 'vertical', mode: 'gaps' | 'centers', layerNames: string[]) => withLayoutRollback(`
+    ${helperFunctions}
+    ${layerTargetHelpers}
+
+    if (app.documents.length === 0) {
+      throw new Error('No active document');
+    }
+    var doc = app.activeDocument;
+
+    function __mcp_boundsOf(layer) {
+      var b = layer.bounds;
+      return {
+        left: b[0].as('px'),
+        top: b[1].as('px'),
+        right: b[2].as('px'),
+        bottom: b[3].as('px'),
+        width: b[2].as('px') - b[0].as('px'),
+        height: b[3].as('px') - b[1].as('px')
+      };
+    }
+
+    var names = [${layerNames.map((name) => `"${jsString(name)}"`).join(', ')}];
+    if (names.length < 3) {
+      throw new Error('invalid_arguments: distribute_layers needs at least 3 layer_names');
+    }
+
+    var items = [];
+    for (var i = 0; i < names.length; i++) {
+      var layer = __mcp_findLayer(doc, names[i]);
+      if (!layer) throw new Error('layer_not_found: no layer named "' + names[i] + '"');
+      var isBackground = false;
+      try { isBackground = layer.isBackgroundLayer; } catch (eBg) {}
+      if (isBackground) throw new Error('invalid_arguments: background layer cannot move');
+      var rect = null;
+      try { rect = __mcp_boundsOf(layer); } catch (eBounds) {}
+      if (!rect || (rect.width === 0 && rect.height === 0)) {
+        throw new Error('invalid_arguments: layer "' + names[i] + '" has no pixel bounds');
+      }
+      __mcp_assertLayoutUnlocked(layer);
+      items.push({ layer: layer, name: String(layer.name), rect: rect });
+    }
+
+    var horiz = '${axis}' === 'horizontal';
+    var mode = '${mode}';
+    items.sort(function (a, b) {
+      if (mode === 'centers') {
+        return horiz
+          ? (a.rect.left + a.rect.right) / 2 - (b.rect.left + b.rect.right) / 2
+          : (a.rect.top + a.rect.bottom) / 2 - (b.rect.top + b.rect.bottom) / 2;
+      }
+      return horiz ? a.rect.left - b.rect.left : a.rect.top - b.rect.top;
+    });
+
+    var moved = [];
+    if (mode === 'centers') {
+      var first = items[0].rect;
+      var last = items[items.length - 1].rect;
+      var c0 = horiz ? (first.left + first.right) / 2 : (first.top + first.bottom) / 2;
+      var cN = horiz ? (last.left + last.right) / 2 : (last.top + last.bottom) / 2;
+      var step = (cN - c0) / (items.length - 1);
+      for (var c = 1; c < items.length - 1; c++) {
+        var rc = items[c].rect;
+        var curC = horiz ? (rc.left + rc.right) / 2 : (rc.top + rc.bottom) / 2;
+        var wantC = c0 + step * c;
+        var delta = wantC - curC;
+        if (delta === 0) continue;
+        var dxc = horiz ? delta : 0;
+        var dyc = horiz ? 0 : delta;
+        items[c].layer.translate(new UnitValue(dxc, 'px'), new UnitValue(dyc, 'px'));
+        moved.push({ layer: items[c].name, dx: dxc, dy: dyc });
+      }
+    } else {
+      var startEdge = horiz ? items[0].rect.left : items[0].rect.top;
+      var endEdge = horiz ? items[items.length - 1].rect.right : items[items.length - 1].rect.bottom;
+      var totalSize = 0;
+      for (var s = 0; s < items.length; s++) {
+        totalSize += horiz ? items[s].rect.width : items[s].rect.height;
+      }
+      var gap = (endEdge - startEdge - totalSize) / (items.length - 1);
+      var cursor = startEdge;
+      for (var g = 0; g < items.length; g++) {
+        var rg = items[g].rect;
+        var currentEdge = horiz ? rg.left : rg.top;
+        var size = horiz ? rg.width : rg.height;
+        var dg = cursor - currentEdge;
+        if (dg !== 0) {
+          var dxg = horiz ? dg : 0;
+          var dyg = horiz ? 0 : dg;
+          items[g].layer.translate(new UnitValue(dxg, 'px'), new UnitValue(dyg, 'px'));
+          moved.push({ layer: items[g].name, dx: dxg, dy: dyg });
+        }
+        cursor += size + gap;
+      }
+    }
+
+    var order = [];
+    for (var oi = 0; oi < items.length; oi++) order.push(items[oi].name);
+    return { ok: true, axis: '${axis}', mode: mode, gap: mode === 'gaps' ? gap : null, order: order, moved: moved };
+  `),
+
+  /**
+   * Duplicate a layer into a rotated ring or a linear run.
+   *
+   * Ring layouts (ticks, marks, stars) are otherwise a duplicate + rotate +
+   * translate loop the caller has to redo for every count.
+   */
+  duplicateArray: (
+    layerName: string,
+    count: number,
+    mode: 'rotate' | 'linear',
+    pivotX: number | null,
+    pivotY: number | null,
+    totalDegrees: number,
+    startDegrees: number,
+    offsetX: number,
+    offsetY: number
+  ) => withLayoutRollback(`
+    ${helperFunctions}
+    ${layerTargetHelpers}
+
+    if (app.documents.length === 0) {
+      throw new Error('No active document');
+    }
+    var doc = app.activeDocument;
+    var source = __mcp_resolveLayer(doc, "${jsString(layerName)}", 0);
+    if (source.isBackgroundLayer) throw new Error('invalid_arguments: background layer cannot be arrayed');
+    __mcp_assertLayoutUnlocked(source);
+    var baseName = '';
+    try { baseName = String(source.name); } catch (eName) {}
+    var total = ${count};
+
+    // A second array on the same source would otherwise reuse "TICK 2" and
+    // make every later name lookup ambiguous.
+    function __mcp_nameTaken(root, wanted) {
+      var taken = false;
+      function scanName(node) {
+        for (var ni = 0; ni < node.layers.length; ni++) {
+          var candidate = node.layers[ni];
+          if (String(candidate.name) === wanted) {
+            taken = true;
+            return;
+          }
+          if (candidate.typename === 'LayerSet') scanName(candidate);
+          if (taken) return;
+        }
+      }
+      scanName(root);
+      return taken;
+    }
+    function __mcp_uniqueName(root, wanted) {
+      if (!__mcp_nameTaken(root, wanted)) return wanted;
+      var suffix = 2;
+      while (__mcp_nameTaken(root, wanted + ' (' + suffix + ')')) suffix++;
+      return wanted + ' (' + suffix + ')';
+    }
+
+    var created = [];
+    if ('${mode}' === 'rotate') {
+      var b = source.bounds;
+      var cx = (b[0].as('px') + b[2].as('px')) / 2;
+      var cy = (b[1].as('px') + b[3].as('px')) / 2;
+      var px = ${pivotX === null || pivotX === undefined ? 'null' : Math.round(pivotX)};
+      var py = ${pivotY === null || pivotY === undefined ? 'null' : Math.round(pivotY)};
+      if (px === null || py === null) {
+        px = doc.width.as('px') / 2;
+        py = doc.height.as('px') / 2;
+      }
+      var step = ${totalDegrees} / total;
+      var start = ${startDegrees};
+      var vx = cx - px;
+      var vy = cy - py;
+      for (var i = 1; i < total; i++) {
+        var angle = start + step * i;
+        var dup = source.duplicate();
+        dup.name = __mcp_uniqueName(doc, baseName + ' ' + (i + 1));
+        dup.rotate(angle);
+        var rad = angle * Math.PI / 180;
+        var nx = px + vx * Math.cos(rad) - vy * Math.sin(rad);
+        var ny = py + vx * Math.sin(rad) + vy * Math.cos(rad);
+        dup.translate(new UnitValue(nx - cx, 'px'), new UnitValue(ny - cy, 'px'));
+        created.push({ name: String(dup.name), angle: angle });
+      }
+      return {
+        ok: true,
+        mode: 'rotate',
+        source: baseName,
+        count: total,
+        pivot: { x: px, y: py },
+        step_degrees: step,
+        created: created
+      };
+    }
+
+    for (var j = 1; j < total; j++) {
+      var dup2 = source.duplicate();
+      dup2.name = __mcp_uniqueName(doc, baseName + ' ' + (j + 1));
+      dup2.translate(new UnitValue(${offsetX} * j, 'px'), new UnitValue(${offsetY} * j, 'px'));
+      created.push({ name: String(dup2.name), offset: { x: ${offsetX} * j, y: ${offsetY} * j } });
+    }
+    return {
+      ok: true,
+      mode: 'linear',
+      source: baseName,
+      count: total,
+      offset_per_step: { x: ${offsetX}, y: ${offsetY} },
+      created: created
+    };
+  `),
+
+  /**
+   * Export one layer as an image file.
+   *
+   * The copy is soloed to that layer and trimmed to its content, so the file is
+   * the layer's pixels — not the canvas with everything else hidden.
+   */
+  exportLayer: (
+    filePath: string,
+    autoDir: string,
+    format: 'PNG' | 'JPEG' | 'WEBP',
+    quality: number,
+    layerName: string,
+    trim = true
+  ) => {
+    const escaped = jsString(filePath);
+    const escapedDir = jsString(autoDir);
+    const q = Math.max(0, Math.min(100, Math.round(quality)));
+    const extension = format === 'JPEG' ? 'jpg' : format.toLowerCase();
+    return `
+    ${helperFunctions}
+    ${artboardHelpers}
+    ${layerTargetHelpers}
+
+    if (app.documents.length === 0) {
+      throw new Error('No active document');
+    }
+    var doc = app.activeDocument;
+    var target = __mcp_resolveLayer(doc, "${jsString(layerName)}", 0);
+    var targetName = '';
+    try { targetName = String(target.name); } catch (eTargetName) {}
+
+    function __mcp_exportRoute(container, wanted) {
+      for (var i = 0; i < container.layers.length; i++) {
+        var layer = container.layers[i];
+        if (__mcp_sameLayer(layer, wanted)) return [i];
+        if (layer.typename === 'LayerSet') {
+          var nested = __mcp_exportRoute(layer, wanted);
+          if (nested) return [i].concat(nested);
+        }
+      }
+      return null;
+    }
+    var targetRoute = __mcp_exportRoute(doc, target);
+    if (!targetRoute) throw new Error('layer_not_found: export target is outside the document');
+
+    var outPath = "${escaped}";
+    if (!outPath) {
+      outPath = "${escapedDir}" + '/' + __mcp_safeFileName(targetName).replace(/ /g, '_') + '-' + (new Date().getTime()) + '.${extension}';
+    }
+
+    app.displayDialogs = DialogModes.NO;
+    var dup = doc.duplicate('__mcp_export_layer__');
+    var result = null;
+    try {
+      // Hide only siblings along the route. Preserve visibility inside a target group.
+      var container = dup;
+      for (var ri = 0; ri < targetRoute.length; ri++) {
+        var index = targetRoute[ri];
+        if (index >= container.layers.length) throw new Error('layer_not_found: duplicate structure changed');
+        for (var si = 0; si < container.layers.length; si++) {
+          if (si !== index) container.layers[si].visible = false;
+        }
+        var selected = container.layers[index];
+        selected.visible = true;
+        container = selected;
+      }
+      var trimmed = false;
+      if (${trim ? 'true' : 'false'}) {
+        try { dup.trim(TrimType.TRANSPARENT); trimmed = true; } catch (eTrim) {}
+      }
+      var width = dup.width.as('px');
+      var height = dup.height.as('px');
+      var outFile = new File(outPath);
+      var exported = __mcp_exportDoc(dup, outFile, '${format}', ${q});
+      if (exported && exported.ok === false) {
+        result = exported;
+      } else {
+        result = {
+          ok: true,
+          path: outPath,
+          format: '${format}',
+          layer: targetName,
+          width: Math.round(width),
+          height: Math.round(height),
+          trimmed: trimmed,
+          method: exported ? exported.method : 'unknown'
+        };
+      }
+    } finally {
+      try { dup.close(SaveOptions.DONOTSAVECHANGES); } catch (eClose) {}
+    }
+    return result;
   `;
   },
 

@@ -2,8 +2,15 @@ import { ToolDefinition, ToolResult } from '../core/tool-registry.js';
 import { PhotoshopConnection } from '../platform/connection.js';
 import { PhotoshopAPIFactory } from '../api/photoshop-api.js';
 import { ExtendScriptSnippets } from '../api/extendscript.js';
-import { atomicFailure, atomicFailureFromError, atomicSuccess, parseSnippetResult, runSnippet } from './atomic-shared.js';
+import {
+  atomicFailure,
+  atomicFailureFromError,
+  atomicSuccess,
+  parseSnippetResult,
+  runSnippet,
+} from './atomic-shared.js';
 import { installUserFont } from '../platform/install-font.js';
+import { layerName } from './layer-target.js';
 import {
   emitTextRangesLiteral,
   emitTextStyleLiteral,
@@ -18,7 +25,7 @@ export function createTextTools(connection: PhotoshopConnection): ToolDefinition
         name: 'photoshop_list_fonts',
         description:
           'List installed fonts available to Photoshop.\n\n' +
-          'Use when: choosing a font for photoshop_create_text_layer or photoshop_set_text_font.\n' +
+          'Use when: choosing a font for photoshop_create_text_layer or photoshop_set_text_style.\n' +
           'TextItem.font requires the PostScript name — use postScriptName from results, or pass display name to set/create tools (they resolve automatically).\n\n' +
           'Returns: fonts array ({ name, postScriptName, family, style }), total count, truncated flag.\n' +
           'First call may be slow (app.fonts.length can exceed 1000). Side effects: none.',
@@ -45,13 +52,13 @@ export function createTextTools(connection: PhotoshopConnection): ToolDefinition
       tool: {
         name: 'photoshop_install_font',
         description:
-          'Install a font file for the current user and reload Photoshop\'s font list without quitting.\n\n' +
+          "Install a font file for the current user and reload Photoshop's font list without quitting.\n\n" +
           'Use when: photoshop_list_fonts does not include a font the user wants, and they already have the font file.\n' +
           'Does not download fonts. file_path is an absolute path to a .ttf, .otf, .ttc, or .otc.\n' +
           'macOS copies it to ~/Library/Fonts (Font Book, Current User). Windows installs it for the current user only, not for all users.\n' +
           'If Photoshop is open, this calls app.refreshFonts() so the new PostScript names are listed immediately. Do not quit Photoshop.\n\n' +
           'Fredoka Bold is the Bold named instance inside the variable font Fredoka[wdth,wght].ttf (SIL Open Font License, Google Fonts). Its PostScript name is Fredoka-Bold. There is no separate Fredoka Bold file in that release.\n\n' +
-          'Returns: installed_path, post_script_names, fonts_refreshed. Side effects: writes the current-user font folder and reloads the open app\'s font list.',
+          "Returns: installed_path, post_script_names, fonts_refreshed. Side effects: writes the current-user font folder and reloads the open app's font list.",
         inputSchema: {
           type: 'object',
           properties: {
@@ -67,99 +74,12 @@ export function createTextTools(connection: PhotoshopConnection): ToolDefinition
     },
     {
       tool: {
-        name: 'photoshop_set_text_font',
-        description:
-          'Set font family and size for active text layer.\n\n' +
-          'Accepts display name (e.g. "Arial") or PostScript name (e.g. "ArialMT") — resolved via app.fonts.\n' +
-          'Use photoshop_list_fonts to discover available fonts. If the font is not listed, install its file with photoshop_install_font. That reloads the open app\'s font list; do not quit Photoshop.',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            fontName: {
-              type: 'string',
-              description: 'Font display or PostScript name (see photoshop_list_fonts)',
-            },
-            fontSize: {
-              type: 'number',
-              description: 'Font size in points (optional)',
-              minimum: 1,
-            },
-          },
-          required: ['fontName'],
-        },
-      },
-      handler: async (args) => setTextFont(connection, args),
-    },
-    {
-      tool: {
-        name: 'photoshop_set_text_color',
-        description:
-          'Set one RGB color on the whole active text layer.\n\n' +
-          'Use when: the entire text layer should share one color.\n' +
-          'Do NOT use when: creating the layer — pass red, green, and blue on photoshop_create_text_layer.\n' +
-          'Do NOT use when: only a character range should change color — use photoshop_set_text_ranges.\n' +
-          'Do NOT use when: font, size, tracking, or alignment should change too — use photoshop_set_text_style.\n\n' +
-          'Returns: the RGB color applied.\n' +
-          'Preconditions: active document and an active text layer. Side effects: updates the text color. The same RGB is idempotent. Reversible with photoshop_undo.',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            red: {
-              type: 'number',
-              description: 'Red component (0-255)',
-              minimum: 0,
-              maximum: 255,
-            },
-            green: {
-              type: 'number',
-              description: 'Green component (0-255)',
-              minimum: 0,
-              maximum: 255,
-            },
-            blue: {
-              type: 'number',
-              description: 'Blue component (0-255)',
-              minimum: 0,
-              maximum: 255,
-            },
-          },
-          required: ['red', 'green', 'blue'],
-        },
-      },
-      handler: async (args) => setTextColor(connection, args),
-    },
-    {
-      tool: {
-        name: 'photoshop_set_text_alignment',
-        description:
-          'Set justification on the whole active text layer (LEFT through FULLYJUSTIFIED).\n\n' +
-          'Use when: the entire text layer should share one alignment.\n' +
-          'Do NOT use when: creating the layer — pass `alignment` on photoshop_create_text_layer.\n' +
-          'Do NOT use when: only a character range should change, or font, color, and tracking should change too — use photoshop_set_text_ranges or photoshop_set_text_style.\n\n' +
-          'Returns: confirmation of the alignment.\n' +
-          'Preconditions: active document and an active text layer. Side effects: updates TextItem.justification. The same alignment is idempotent. Reversible with photoshop_undo.',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            alignment: {
-              type: 'string',
-              description: 'Text alignment',
-              enum: ['LEFT', 'CENTER', 'RIGHT', 'LEFTJUSTIFIED', 'CENTERJUSTIFIED', 'RIGHTJUSTIFIED', 'FULLYJUSTIFIED'],
-            },
-          },
-          required: ['alignment'],
-        },
-      },
-      handler: async (args) => setTextAlignment(connection, args),
-    },
-    {
-      tool: {
         name: 'photoshop_update_text_content',
         description:
           'Replace the string contents of the active text layer. Font, color, and alignment stay as they are.\n\n' +
           'Use when: the wording of an existing text layer should change.\n' +
           'Do NOT use when: no text layer exists yet — use photoshop_create_text_layer.\n' +
-          'Do NOT use when: only style should change — use photoshop_set_text_style, photoshop_set_text_font, photoshop_set_text_color, or photoshop_set_text_alignment.\n\n' +
+          'Do NOT use when: only style should change — use photoshop_set_text_style.\n\n' +
           'Returns: confirmation with the new text.\n' +
           'Preconditions: active document and an active text layer. Side effects: replaces the characters. The same string is idempotent. Reversible with photoshop_undo.',
         inputSchema: {
@@ -177,22 +97,44 @@ export function createTextTools(connection: PhotoshopConnection): ToolDefinition
     },
     {
       tool: {
+        name: 'photoshop_get_text',
+        description:
+          "Read text content, typography, and pixel bounds. all=true scans every text layer; otherwise read layer_name/layer_id or the active layer.\n" +
+          "Returns: scope=layer with layer, or scope=document with count and layers[]. Each entry includes id/name/parent, contents, font, size/leading (pt), tracking, kind, paragraph box size, alignment, RGB, bounds.\n" +
+          "Preconditions: active document; a single target must be text. Side effects: none. Use photoshop_get_layers for the layer tree.",
+        inputSchema: {
+          type: 'object',
+          properties: {
+            all: {
+              type: 'boolean',
+              description: 'Return every text layer in the document instead of a single layer',
+              default: false,
+            },
+            layer_name: {
+              type: 'string',
+              description:
+                'Target text layer by name (searches nested groups). Omit to read the active layer.',
+            },
+          },
+        },
+      },
+      handler: async (args) => getText(connection, args),
+    },
+    {
+      tool: {
         name: 'photoshop_set_text_style',
         description:
-          'Set layer-wide typography on the active text layer: tracking, leading, point vs paragraph box, alignment, font, size, color.\n\n' +
-          'Users often say: letter spacing, tracking, line height, leading, text box width, paragraph text, 字间距, 行高, 文本框.\n\n' +
-          'Use when: tightening/loosening type, setting line height, converting to a wrapped paragraph box, or batching several text attributes in one undo-friendly call.\n' +
-          'Do NOT use when: creating a new layer — pass the same fields on photoshop_create_text_layer.\n' +
-          'Do NOT use when: mixed fonts/colors inside one layer — use photoshop_set_text_ranges.\n' +
-          'Do NOT use execute_script for tracking/leading/box.\n\n' +
-          'Returns: JSON { ok, summary, details: { style } }.\n' +
-          'Preconditions: active text layer. Side effects: mutates TextItem attributes.',
+          "Set whole-layer typography: font, size, color, alignment, kerning, tracking, leading, or paragraph box. Display font names resolve to PostScript names; discover fonts with photoshop_list_fonts.\n" +
+          "Use photoshop_create_text_layer for new text, photoshop_update_text_content for wording, or photoshop_set_text_ranges for mixed styles.\n" +
+          "Returns: updated style. Preconditions: active text layer. Side effects: updates TextItem attributes.",
         inputSchema: {
           type: 'object',
           properties: {
             kerning_mode: {
-              type: 'string', enum: ['manual', 'metrics', 'optical'],
-              description: 'Kerning mode. New text defaults to manual with zero pair adjustment; tracking is a separate spacing setting.',
+              type: 'string',
+              enum: ['manual', 'metrics', 'optical'],
+              description:
+                'Kerning mode. New text defaults to manual with zero pair adjustment; tracking is a separate spacing setting.',
             },
             tracking: {
               type: 'number',
@@ -233,7 +175,7 @@ export function createTextTools(connection: PhotoshopConnection): ToolDefinition
                 'RIGHTJUSTIFIED',
                 'FULLYJUSTIFIED',
               ],
-              description: 'Justification (same enum as photoshop_set_text_alignment)',
+              description: 'Text justification for the whole layer',
             },
             fontName: {
               type: 'string',
@@ -276,7 +218,10 @@ export function createTextTools(connection: PhotoshopConnection): ToolDefinition
                 properties: {
                   from: { type: 'number', description: 'Start index (inclusive)', minimum: 0 },
                   to: { type: 'number', description: 'End index (exclusive)' },
-                  fontName: { type: 'string', description: 'Font display or PostScript name for this span' },
+                  fontName: {
+                    type: 'string',
+                    description: 'Font display or PostScript name for this span',
+                  },
                   fontSize: { type: 'number', description: 'Size in points', minimum: 1 },
                   red: { type: 'number', minimum: 0, maximum: 255 },
                   green: { type: 'number', minimum: 0, maximum: 255 },
@@ -426,111 +371,6 @@ async function listFonts(
   }
 }
 
-async function setTextFont(
-  connection: PhotoshopConnection,
-  args: Record<string, unknown>
-): Promise<ToolResult> {
-  const fontName = args.fontName as string;
-  const fontSize = args.fontSize as number | undefined;
-
-  try {
-    const apiFactory = new PhotoshopAPIFactory(connection);
-    const api = await apiFactory.createAPI();
-
-    const script = ExtendScriptSnippets.setTextFont(fontName, fontSize);
-    const result = await api.executeScript(script);
-
-    return {
-      content: [
-        {
-          type: 'text' as const,
-          text: `Text font set to ${fontName}${fontSize ? `, size ${fontSize}pt` : ''}\nResult: ${JSON.stringify(result)}`,
-        },
-      ],
-    };
-  } catch (error) {
-    return {
-      content: [
-        {
-          type: 'text' as const,
-          text: `Error setting text font: ${error instanceof Error ? error.message : String(error)}`,
-        },
-      ],
-      isError: true,
-    };
-  }
-}
-
-async function setTextColor(
-  connection: PhotoshopConnection,
-  args: Record<string, unknown>
-): Promise<ToolResult> {
-  const red = args.red as number;
-  const green = args.green as number;
-  const blue = args.blue as number;
-
-  try {
-    const apiFactory = new PhotoshopAPIFactory(connection);
-    const api = await apiFactory.createAPI();
-
-    const script = ExtendScriptSnippets.setTextColor(red, green, blue);
-    await api.executeScript(script);
-
-    return {
-      content: [
-        {
-          type: 'text' as const,
-          text: `Text color set to RGB(${red}, ${green}, ${blue})`,
-        },
-      ],
-    };
-  } catch (error) {
-    return {
-      content: [
-        {
-          type: 'text' as const,
-          text: `Error setting text color: ${error instanceof Error ? error.message : String(error)}`,
-        },
-      ],
-      isError: true,
-    };
-  }
-}
-
-async function setTextAlignment(
-  connection: PhotoshopConnection,
-  args: Record<string, unknown>
-): Promise<ToolResult> {
-  const alignment = args.alignment as string;
-
-  try {
-    const apiFactory = new PhotoshopAPIFactory(connection);
-    const api = await apiFactory.createAPI();
-
-    const script = ExtendScriptSnippets.setTextAlignment(alignment);
-    await api.executeScript(script);
-
-    return {
-      content: [
-        {
-          type: 'text' as const,
-          text: `Text alignment set to ${alignment}`,
-        },
-      ],
-    };
-  } catch (error) {
-    return {
-      content: [
-        {
-          type: 'text' as const,
-          text: `Error setting text alignment: ${error instanceof Error ? error.message : String(error)}`,
-        },
-      ],
-      isError: true,
-    };
-  }
-}
-
 async function updateTextContent(
   connection: PhotoshopConnection,
   args: Record<string, unknown>
@@ -565,6 +405,48 @@ async function updateTextContent(
   }
 }
 
+async function getText(
+  connection: PhotoshopConnection,
+  args: Record<string, unknown>
+): Promise<ToolResult> {
+  const all = args.all === true;
+  try {
+    const raw = await runSnippet(connection, ExtendScriptSnippets.getText(layerName(args), all));
+    const details = parseSnippetResult(raw);
+    if (!details) {
+      return atomicFailureFromError(new Error(`Unparseable text result: ${String(raw)}`));
+    }
+    if (details.scope === 'document') {
+      const layers = Array.isArray(details.layers) ? details.layers : [];
+      const names = layers
+        .slice(0, 8)
+        .map((entry) =>
+          entry && typeof entry === 'object'
+            ? String((entry as Record<string, unknown>).name ?? '')
+            : ''
+        )
+        .filter((value) => value.length > 0);
+      const suffix = layers.length > names.length ? ', …' : '';
+      return atomicSuccess(
+        `Found ${layers.length} text layer(s)${names.length ? `: ${names.join(', ')}${suffix}` : ''}`,
+        details
+      );
+    }
+    const layer =
+      details.layer && typeof details.layer === 'object'
+        ? (details.layer as Record<string, unknown>)
+        : {};
+    const contents = typeof layer.contents === 'string' ? layer.contents : '';
+    const font = typeof layer.font === 'string' ? layer.font : 'font unknown';
+    const size =
+      typeof layer.size === 'number' ? `${Math.round(layer.size * 100) / 100}pt` : 'size unknown';
+    const alignment = typeof layer.alignment === 'string' ? `, ${layer.alignment}` : '';
+    return atomicSuccess(`"${contents}" — ${font} ${size}${alignment}`, details);
+  } catch (error) {
+    return atomicFailureFromError(error);
+  }
+}
+
 async function setTextStyle(
   connection: PhotoshopConnection,
   args: Record<string, unknown>
@@ -573,12 +455,18 @@ async function setTextStyle(
   if (parsed.error) return atomicFailure(parsed.error);
 
   try {
-    const raw = await runSnippet(connection, ExtendScriptSnippets.setTextStyle(emitTextStyleLiteral(parsed.style)));
+    const raw = await runSnippet(
+      connection,
+      ExtendScriptSnippets.setTextStyle(emitTextStyleLiteral(parsed.style))
+    );
     const details = parseSnippetResult(raw);
     if (!details) {
       return atomicFailureFromError(new Error(`Unparseable text style result: ${String(raw)}`));
     }
-    const style = details.style && typeof details.style === 'object' ? (details.style as Record<string, unknown>) : details;
+    const style =
+      details.style && typeof details.style === 'object'
+        ? (details.style as Record<string, unknown>)
+        : details;
     const tracking = typeof style.tracking === 'number' ? ` tracking=${style.tracking}` : '';
     const kind = typeof style.kind === 'string' ? ` ${style.kind}` : '';
     return atomicSuccess(`Text style updated${kind}${tracking}`, details);
@@ -595,7 +483,10 @@ async function setTextRanges(
   if (parsed.error) return atomicFailure(parsed.error);
 
   try {
-    const raw = await runSnippet(connection, ExtendScriptSnippets.setTextRanges(emitTextRangesLiteral(parsed.ranges)));
+    const raw = await runSnippet(
+      connection,
+      ExtendScriptSnippets.setTextRanges(emitTextRangesLiteral(parsed.ranges))
+    );
     const details = parseSnippetResult(raw);
     if (!details) {
       return atomicFailureFromError(new Error(`Unparseable text ranges result: ${String(raw)}`));

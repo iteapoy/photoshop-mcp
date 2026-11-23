@@ -16,7 +16,7 @@ export function createLayerPropertiesTools(connection: PhotoshopConnection): Too
         description:
           'Rasterize a layer, converting text or a smart object to a normal pixel layer. Pass layer_name to target a layer directly, otherwise the active layer is used.\n\n' +
           'Use when: a filter, fill, or transform needs real pixels (text and smart objects cannot take most filters).\n' +
-          'Do NOT use when: the text stays editable — restyle it with photoshop_set_text_color / photoshop_execute_script instead.\n' +
+          'Do NOT use when: the text stays editable — restyle it with photoshop_set_text_style instead.\n' +
           'Do NOT use when: the layer is already NORMAL — the call is a no-op that reports it.\n\n' +
           'Returns: rasterized, layerName, originalKind, newKind.\n' +
           'Preconditions: active document and a single (non-group) layer. Side effects: irreversible content change (text becomes pixels); makes the layer active. Undo restores the previous state.',

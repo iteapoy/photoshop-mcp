@@ -86,18 +86,15 @@ export const TOOL_ANNOTATIONS: Record<string, PhotoshopToolAnnotations> = {
   photoshop_adjust_hue_saturation: harm(false),
   photoshop_auto_levels: harm(false),
   photoshop_auto_contrast: harm(false),
-  photoshop_adjust_curves: edit(false),
   photoshop_desaturate: harm(true),
   photoshop_invert: harm(false),
 
   photoshop_list_fonts: read,
   photoshop_install_font: edit(false),
-  photoshop_set_text_font: edit(true),
-  photoshop_set_text_color: edit(true),
-  photoshop_set_text_alignment: edit(true),
   photoshop_update_text_content: edit(true),
   photoshop_set_text_style: edit(true),
   photoshop_set_text_ranges: edit(true),
+  photoshop_get_text: read,
 
   photoshop_get_selection_bounds: read,
   photoshop_select_ellipse: edit(false),
@@ -129,11 +126,7 @@ export const TOOL_ANNOTATIONS: Record<string, PhotoshopToolAnnotations> = {
   photoshop_revert_to_state: harm(false),
   photoshop_get_history: read,
 
-  photoshop_move_layer_to_position: edit(false),
-  photoshop_move_layer_to_top: edit(true),
-  photoshop_move_layer_to_bottom: edit(true),
-  photoshop_move_layer_up: edit(false),
-  photoshop_move_layer_down: edit(false),
+  photoshop_reorder_layer: edit(false),
 
   photoshop_generative_fill: harm(false, true),
   photoshop_generative_remove: harm(false, true),
@@ -145,15 +138,7 @@ export const TOOL_ANNOTATIONS: Record<string, PhotoshopToolAnnotations> = {
 
   photoshop_apply_layer_style: edit(true),
 
-  photoshop_apply_lut: edit(false),
-  photoshop_adjust_vibrance: edit(false),
-  photoshop_adjust_exposure: edit(false),
-  photoshop_apply_photo_filter: edit(false),
-  photoshop_create_black_and_white_adjustment_layer: edit(false),
-  photoshop_create_posterize_adjustment_layer: edit(false),
-  photoshop_create_threshold_adjustment_layer: edit(false),
   photoshop_create_adjustment_layer: edit(false),
-  photoshop_apply_gradient_map: edit(false),
 
   photoshop_list_datasets: read,
   photoshop_import_datasets: edit(false),
@@ -161,6 +146,7 @@ export const TOOL_ANNOTATIONS: Record<string, PhotoshopToolAnnotations> = {
   photoshop_image_stack: edit(false),
 
   photoshop_export_as: edit(false),
+  photoshop_export_layer: edit(false),
   photoshop_list_artboards: read,
   photoshop_create_artboard: edit(false),
   photoshop_set_active_artboard: edit(true),
@@ -185,10 +171,13 @@ export const TOOL_ANNOTATIONS: Record<string, PhotoshopToolAnnotations> = {
   photoshop_recipe_sticker_outline: edit(true),
 
   photoshop_create_group: edit(false),
-  photoshop_group_layers: edit(false),
   photoshop_move_layers_to_group: edit(false),
   photoshop_ungroup: harm(false),
   photoshop_create_shape_layer: edit(false),
+  photoshop_align_layers: edit(true),
+  photoshop_distribute_layers: edit(true),
+  photoshop_duplicate_array: edit(false),
+
   photoshop_create_path: edit(false),
   photoshop_stroke_path: harm(false),
   photoshop_fill_path: harm(false),

@@ -240,7 +240,6 @@ class ExtendScriptPhotoshopAPI implements PhotoshopAPI {
   } catch (error) {
     var errorMessage = '';
     var errorNumber = '';
-    errorMessage = '';
     try { errorMessage = error.message; } catch (e) {}
     try { errorNumber = String(error.number); } catch (e2) {}
     if (!errorMessage) {

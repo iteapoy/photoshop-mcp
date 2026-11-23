@@ -52,7 +52,7 @@ export class ToolRegistry {
 
   async execute(name: string, args: Record<string, unknown>): Promise<ToolResult> {
     const definition = this.tools.get(name);
-    
+
     if (!definition) {
       throw new Error(`Tool not found: ${name}`);
     }
