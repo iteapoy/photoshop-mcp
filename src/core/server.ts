@@ -1,3 +1,4 @@
+import { createIdTools } from '../tools/id-tools.js';
 import { createGroupTools } from '../tools/group-tools.js';
 import { createHistoryStateTools } from '../tools/history-state-tools.js';
 import { withOptionalLayerId, wrapLayerIdHandler } from './layer-target.js';
@@ -138,6 +139,7 @@ export class PhotoshopMCPServer {
     this.registerToolDefinitions(createSelectionTools(connection));
     this.registerToolDefinitions(createMaskTools(connection));
     this.registerToolDefinitions(createActionTools(connection));
+    this.registerToolDefinitions(createIdTools(connection));
     this.registerToolDefinitions(createHistoryTools(connection));
     this.registerToolDefinitions(createHistoryStateTools(connection));
     this.registerToolDefinitions(createLayerOrderingTools(connection));

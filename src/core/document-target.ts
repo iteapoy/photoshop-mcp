@@ -7,6 +7,7 @@ const targetDocumentId = new AsyncLocalStorage<number | undefined>();
 /** Tools that already manage documents themselves, or never target a document. */
 export const DOCUMENT_ID_SCHEMA_EXCLUDES = new Set([
   'photoshop_ping',
+  'photoshop_resolve_ids',
   'photoshop_get_version',
   'photoshop_get_capabilities',
   'photoshop_list_documents',

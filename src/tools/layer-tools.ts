@@ -50,7 +50,7 @@ export function createLayerTools(connection: PhotoshopConnection): ToolDefinitio
             layer_name: {
               type: 'string',
               description:
-                'Target layer by name (searches nested groups). Omit or leave empty to delete the active layer.',
+                'Unique target layer name (searches nested groups). Duplicates fail with ambiguous_name; use layer_id. Omit to delete the active layer.',
             },
           },
         },
@@ -280,7 +280,7 @@ export function createLayerTools(connection: PhotoshopConnection): ToolDefinitio
           'Use when: the follow-up step has no layer_name argument (masks, some filters) or the user wants this layer active in the UI.\n' +
           'Do NOT use when: the next tool accepts layer_name (transforms, ordering, opacity, visibility, duplicate, rasterize, layer styles) — pass the name there instead of selecting first.\n\n' +
           'Returns: selected, layerName, kind, bounds (best-effort), context.\n' +
-          'First depth-first name match wins when duplicate names exist in different groups.\n' +
+          'Duplicate names return ambiguous_name; use layer_id to identify the intended layer.\n' +
           'Preconditions: active document. Side effects: changes active layer.',
         inputSchema: {
           type: 'object',

@@ -71,7 +71,7 @@ export function createPathTools(connection: PhotoshopConnection): ToolDefinition
       tool: {
         name: 'photoshop_stroke_path',
         description:
-          'Stroke a named vector path onto the active layer with an RGB color. For a dashed/dotted line, pass dash and gap (both in px, e.g. dash=8, gap=6); omit both for a solid stroke.\n\n' +
+          'Rasterize a native vector stroke onto the target pixel layer, preserving its ID, selection and foreground color. Width is in pixels, opacity is 0–100, and inside/outside alignment requires closed paths. For a dashed/dotted line, pass dash and gap (both in px, e.g. dash=8, gap=6); omit both for a solid stroke.\n\n' +
           'Use when: turning a path (from photoshop_create_path) into a visible line, dashed orbit, or outline.\n' +
           'Do NOT use when: you need a fill (interior) — use photoshop_fill_path.\n\n' +
           'Returns: confirmation with stroke color and whether it was dashed.\n' +
@@ -79,6 +79,10 @@ export function createPathTools(connection: PhotoshopConnection): ToolDefinition
         inputSchema: {
           type: 'object',
           properties: {
+            width: { type: 'number', minimum: 0.1, maximum: 1000, default: 1, description: 'Stroke width in pixels.' },
+            opacity: { type: 'number', minimum: 0, maximum: 100, default: 100 },
+            alignment: { type: 'string', enum: ['inside', 'center', 'outside'], default: 'center',
+              description: 'Inside/outside require all subpaths to be closed. Open paths support center.' },
             name: {
               type: 'string',
               description: 'Name of the path to stroke',
@@ -197,10 +201,23 @@ async function strokePath(
   const dash = parseNumber(args.dash, 0);
   const gap = parseNumber(args.gap, 0);
 
+  const width = args.width === undefined ? 1 : args.width;
+  const opacity = args.opacity === undefined ? 100 : args.opacity;
+  const alignment = args.alignment ?? 'center';
+  if (typeof width !== 'number' || !Number.isFinite(width) || width < 0.1 || width > 1000 ||
+      typeof opacity !== 'number' || !Number.isFinite(opacity) || opacity < 0 || opacity > 100 ||
+      !['inside', 'center', 'outside'].includes(String(alignment)) ||
+      (args.dash !== undefined && (typeof args.dash !== 'number' || !Number.isFinite(args.dash) || args.dash < 0)) ||
+      (args.gap !== undefined && (typeof args.gap !== 'number' || !Number.isFinite(args.gap) || args.gap < 0)) ||
+      ((dash > 0) !== (gap > 0))) {
+    return atomicFailureFromError(new Error('Invalid parameter: width, opacity, alignment, or dash/gap pair'));
+  }
   try {
     const raw = await runSnippet(
       connection,
-      ExtendScriptSnippets.strokePath(name, color.r, color.g, color.b, dash, gap)
+      ExtendScriptSnippets.strokePath(name, color.r, color.g, color.b, dash, gap, {
+        width, opacity, alignment: alignment as 'inside' | 'center' | 'outside',
+      })
     );
     const parsed = parseSnippetResult(raw);
     if (!parsed) {

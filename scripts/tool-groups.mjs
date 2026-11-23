@@ -199,6 +199,7 @@ export function groupOf(toolName, config = loadGroupConfig()) {
     return 'adjust';
   }
   if (['create_group', 'group_layers', 'move_layers_to_group', 'ungroup'].includes(s)) return 'layer';
+  if (s === 'resolve_ids') return 'system';
   if (s === 'save_snapshot' || s === 'revert_to_state') return 'document';
   if (s === 'create_shape_layer') return 'path';
   if (s.endsWith('_path') || s === 'create_path') return 'path';

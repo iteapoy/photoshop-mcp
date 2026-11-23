@@ -53,6 +53,7 @@ const ERROR_PATTERNS: Array<{
   code: PhotoshopErrorCode;
   suggested_next_tool?: string;
 }> = [
+  { pattern: /ambiguous_name|Ambiguous layer name/i, code: 'ambiguous_name', suggested_next_tool: 'photoshop_get_layers' },
   { pattern: /非法参数|应为枚举值|invalid (?:argument|parameter)|number: (?:1200|1220|1224)\b/i,
     code: 'invalid_arguments' },
   { pattern: /不是函数|is not a function|undefined is not an object|unsupported api/i,
@@ -81,7 +82,7 @@ const ERROR_PATTERNS: Array<{
     suggested_next_tool: 'photoshop_get_layers',
   },
   {
-    pattern: /layer not found/i,
+    pattern: /layer_not_found|layer not found/i,
     code: 'layer_not_found',
     suggested_next_tool: 'photoshop_get_layers',
   },

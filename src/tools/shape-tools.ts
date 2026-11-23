@@ -61,9 +61,20 @@ export function shapeScript(args: Record<string, unknown>): string {
   return `
     if (!app.documents.length) throw new Error('No active document');
     var doc = app.activeDocument;
-    var layer = null;
+    var layer = null, scratchId = null, createdId = null;
+    function removeScratch(container) {
+      for (var i = 0; i < container.layers.length; i++) {
+        var candidate = container.layers[i];
+        if (candidate.id === scratchId && candidate.id !== createdId) {
+          candidate.remove(); return;
+        }
+        if (candidate.typename === 'LayerSet') removeScratch(candidate);
+      }
+    }
     // Explicit geometry creates a new vector mask regardless of the active work path.
     try {
+      var scratch = doc.artLayers.add();
+      scratchId = scratch.id;
       var d = new ActionDescriptor(), ref = new ActionReference();
       ref.putClass(stringIDToTypeID('contentLayer'));
       d.putReference(charIDToTypeID('null'), ref);
@@ -103,6 +114,8 @@ export function shapeScript(args: Record<string, unknown>): string {
       d.putObject(charIDToTypeID('Usng'), stringIDToTypeID('contentLayer'), using);
       executeAction(charIDToTypeID('Mk  '), d, DialogModes.NO);
       layer = doc.activeLayer;
+      createdId = layer.id;
+      removeScratch(doc);
       ${angle ? `layer.rotate(${angle}, AnchorPosition.MIDDLECENTER);` : ''}
       ${args.name ? `layer.name = ${JSON.stringify(args.name)};` : ''}
       layer.opacity = ${opacity};
@@ -123,6 +136,7 @@ export function shapeScript(args: Record<string, unknown>): string {
         kind: String(layer.kind), opacity: layer.opacity };
     } catch (error) {
       if (layer) { try { layer.remove(); } catch (cleanupError) {} }
+      try { removeScratch(doc); } catch (scratchError) {}
       throw error;
     }
   `;

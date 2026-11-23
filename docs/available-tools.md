@@ -1,6 +1,6 @@
 # Available Tools
 
-**143 tools total** — 126 atomic `photoshop_*` tools plus 17 recipe `photoshop_recipe_*` workflows (single undo step each).
+**144 tools total** — 127 atomic `photoshop_*` tools plus 17 recipe `photoshop_recipe_*` workflows (single undo step each).
 
 Reference for all atomic `photoshop_*` MCP tools exposed by this server (parameters, examples, and return shapes).
 
@@ -1464,3 +1464,29 @@ reports `rollback` as `succeeded` or `failed: ...`. Recovery covers only
 recoverable history edits in that open document. Other documents, saved files,
 external side effects, closed documents and discarded history are outside that
 scope. A timeout does not guarantee that execution stopped or rollback finished.
+
+### Path stroke width, opacity and alignment
+
+`photoshop_stroke_path` accepts `width` (0.1–1000 px, default 1),
+`opacity` (0–100, default 100), and `alignment` (`center`, `inside`,
+`outside`; default `center`). Open subpaths support center alignment only.
+`dash` and `gap` are pixel lengths and must both be positive or both zero.
+The tool renders native vector stroke geometry into a temporary alpha mask
+and paints the original pixel layer, preserving its ID and the caller's
+selection and foreground color. Temporary layers, paths and channels are
+cleaned up. The target must be an unlocked pixel layer without transparency
+lock. The returned `selection_bounds` describes the clipped stroke mask;
+`target_bounds` describes layer contents after painting.
+
+### Name ambiguity and Action Manager ID diagnostics
+
+Name-based layer operations reject duplicate names with `ambiguous_name`.
+Use `layer_id` to disambiguate. Unique-name and active-layer calls remain
+supported for compatibility.
+
+`photoshop_resolve_ids` (HTTP `system/resolve_ids`) accepts
+`{ "ids": [{ "kind": "char", "value": "Usng" }, { "kind": "string", "value": "using" }] }`.
+Invalid charID lengths return `invalid_arguments` before Photoshop execution
+and explain the four-character requirement. Four-character inputs also return
+both interpretations for comparison. A four-character stringID can be valid;
+ID kind must be explicit and numeric IDs alone do not prove descriptor semantics.

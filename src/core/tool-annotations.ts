@@ -120,6 +120,7 @@ export const TOOL_ANNOTATIONS: Record<string, PhotoshopToolAnnotations> = {
   photoshop_release_clipping_mask: edit(true),
 
   photoshop_play_action: harm(false),
+  photoshop_resolve_ids: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   photoshop_execute_script: harm(false, true),
 
   photoshop_undo: harm(false),

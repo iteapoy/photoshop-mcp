@@ -1,3 +1,4 @@
+import { nativePathStrokeScript, type PathStrokeOptions } from './path-stroke.js';
 /**
  * Helper functions for ExtendScript API
  * ExtendScript is the legacy scripting API for Photoshop
@@ -24,20 +25,17 @@ function sTID(s) { return app.stringIDToTypeID(s); }
 const layerTargetHelpers = `
 function __mcp_findLayer(container, name) {
   if (!container || !name) return null;
-  try {
-    var layers = container.layers;
-    for (var i = 0; i < layers.length; i++) {
-      if (String(layers[i].name) === String(name)) return layers[i];
+  var matches = [];
+  function scan(node) {
+    for (var i = 0; i < node.layers.length; i++) {
+      var layer = node.layers[i];
+      if (String(layer.name) === String(name)) matches.push(layer);
+      if (layer.typename === 'LayerSet') scan(layer);
     }
-  } catch (eLayers) {}
-  try {
-    var sets = container.layerSets;
-    for (var j = 0; j < sets.length; j++) {
-      var nested = __mcp_findLayer(sets[j], name);
-      if (nested) return nested;
-    }
-  } catch (eSets) {}
-  return null;
+  }
+  scan(container);
+  if (matches.length > 1) throw new Error('ambiguous_name: multiple layers named "' + name + '"; use layer_id');
+  return matches.length ? matches[0] : null;
 }
 
 function __mcp_findPath(container, name, chain) {
@@ -137,6 +135,7 @@ function __mcp_resolveLayer(doc, name, index) {
 
 /** Hide every layer except the named one (and its parent groups). Returns the layer. */
 function __mcp_soloLayer(doc, name) {
+  __mcp_findLayer(doc, name);
   var chain = [];
   var found = __mcp_findPath(doc, name, chain);
   if (!found) throw new Error('layer_not_found: no layer named "' + name + '"');
@@ -976,15 +975,18 @@ function __mcp_c2t(s) { return cTID(s); }
  */
 export const MCP_SMART_OBJECT_HELPERS = `
 function __mcp_findLayer(container, name) {
-  for (var i = 0; i < container.layers.length; i++) {
-    var l = container.layers[i];
-    if (l.name === name) return l;
+  if (!container || !name) return null;
+  var matches = [];
+  function scan(node) {
+    for (var i = 0; i < node.layers.length; i++) {
+      var layer = node.layers[i];
+      if (String(layer.name) === String(name)) matches.push(layer);
+      if (layer.typename === 'LayerSet') scan(layer);
+    }
   }
-  for (var j = 0; j < container.layerSets.length; j++) {
-    var nested = __mcp_findLayer(container.layerSets[j], name);
-    if (nested) return nested;
-  }
-  return null;
+  scan(container);
+  if (matches.length > 1) throw new Error('ambiguous_name: multiple layers named "' + name + '"; use layer_id');
+  return matches.length ? matches[0] : null;
 }
 
 function __mcp_activateLayerByName(layerName) {
@@ -2084,6 +2086,7 @@ export const ExtendScriptSnippets = {
    */
   selectLayerByName: (name: string) => `
     ${getContextInfo}
+    ${layerTargetHelpers}
     
     if (app.documents.length === 0) {
       throw new Error('No active document');
@@ -2091,18 +2094,7 @@ export const ExtendScriptSnippets = {
     var doc = app.activeDocument;
     var targetName = "${jsString(name)}";
     var target = null;
-    function findLayer(container, name) {
-      for (var i = 0; i < container.layers.length; i++) {
-        var l = container.layers[i];
-        if (l.name === name) return l;
-      }
-      for (var j = 0; j < container.layerSets.length; j++) {
-        var nested = findLayer(container.layerSets[j], name);
-        if (nested) return nested;
-      }
-      return null;
-    }
-    target = typeof __mcp_targetLayerId !== 'undefined' ? doc.activeLayer : findLayer(doc, targetName);
+    target = typeof __mcp_targetLayerId !== 'undefined' ? doc.activeLayer : __mcp_findLayer(doc, targetName);
     if (!target) {
       throw new Error('Layer not found: ' + targetName);
     }
@@ -5778,8 +5770,9 @@ export const ExtendScriptSnippets = {
     green: number,
     blue: number,
     dash: number,
-    gap: number
-  ) => `
+    gap: number,
+    options?: PathStrokeOptions
+  ) => options ? nativePathStrokeScript(name, red, green, blue, dash, gap, options) : `
     ${helperFunctions}
     ${selectionHelpers}
     ${getContextInfo}
