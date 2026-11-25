@@ -56,7 +56,7 @@ flowchart TB
 
 `PhotoshopMCPServer` wires the official MCP SDK with:
 
-- **132 tools** registered by `ToolRegistry` (atomic operations + outcome-oriented recipes + generative/neural AI).
+- **29 public MCP entries** by default. Nineteen action tools dispatch to the existing handlers, including two grouped recipe tools. Remove Background has its own entry. The 132 original tools remain callable, and the standalone UI advertises that original catalog.
 - **24 prompts** via `PromptRegistry` (`prompts/list`, `prompts/get`).
 - **Server instructions** on `initialize` — workflow contract for host LLMs (state-before-action, prefer recipes, error recovery). See [`src/prompts/instructions.ts`](../src/prompts/instructions.ts).
 - **Structured error wrapping** — every tool handler passes through `wrapToolHandler` so failures return JSON with `code` and `suggested_next_tool` for agentic repair loops.

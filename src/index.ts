@@ -12,6 +12,7 @@ import {
 } from './analytics/index.js';
 import type { McpShutdownReason } from './analytics/mcp-session.js';
 import { PhotoshopMCPServer } from './core/server.js';
+import { PHOTOSHOP_MCP_SURFACE_ENV } from './lib/export-paths.js';
 import { refreshUpdateCheck } from './update/check.js';
 import { Logger } from './utils/logger.js';
 
@@ -29,7 +30,10 @@ async function main() {
     // Background npm lookup (cached 24h, 3s timeout). photoshop_ping reads the cache only.
     void refreshUpdateCheck();
 
-    mcpServer = new PhotoshopMCPServer({ serverVersion: getAppVersion() });
+    mcpServer = new PhotoshopMCPServer({
+      serverVersion: getAppVersion(),
+      advertiseLegacyTools: process.env[PHOTOSHOP_MCP_SURFACE_ENV] === 'ui',
+    });
     await mcpServer.start();
 
     const photoshopVersion = await mcpServer.getPhotoshopVersion();

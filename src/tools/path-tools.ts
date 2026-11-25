@@ -29,6 +29,8 @@ function normalizeSubpaths(raw: unknown): unknown[] | null {
   return raw as unknown[];
 }
 
+const coordinatePair = { type: 'array', items: { type: 'number' }, minItems: 2, maxItems: 2 };
+
 export function createPathTools(connection: PhotoshopConnection): ToolDefinition[] {
   return [
     {
@@ -47,9 +49,24 @@ export function createPathTools(connection: PhotoshopConnection): ToolDefinition
               type: 'array',
               description:
                 'Array of subpaths. Each subpath is an array of points: [x,y] or {anchor,leftDirection,rightDirection}.',
+              minItems: 1,
               items: {
                 type: 'array',
-                items: { type: 'array' },
+                minItems: 1,
+                items: {
+                  anyOf: [
+                    coordinatePair,
+                    {
+                      type: 'object',
+                      properties: {
+                        anchor: coordinatePair,
+                        leftDirection: coordinatePair,
+                        rightDirection: coordinatePair,
+                      },
+                      required: ['anchor'],
+                    },
+                  ],
+                },
               },
             },
             closed: {

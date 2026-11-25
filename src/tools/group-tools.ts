@@ -161,7 +161,10 @@ export function createGroupTools(connection: PhotoshopConnection): ToolDefinitio
       name: 'photoshop_move_layers_to_group',
       description:
         'Move sibling layer_ids to the top of group_id, preserving their relative stack order and individual visibility. Rejects cyclic nesting.',
-      properties: { group_id: { type: 'integer', minimum: 1 }, layer_ids: idList },
+      properties: {
+        group_id: { type: 'integer', minimum: 1, description: 'Destination group ID.' },
+        layer_ids: { ...idList, minItems: 1, description: 'IDs of sibling layers to move into the destination group.' },
+      },
       required: ['group_id', 'layer_ids'],
     },
     {

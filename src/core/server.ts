@@ -61,9 +61,17 @@ import { ensureUxpBridgeServer } from '../platform/uxp-bridge-server.js';
 import { submitFeedbackFromArgs } from '../feedback/nudge.js';
 import { probePhotoshopEngine } from './ping-engine.js';
 import { refreshUpdateCheck } from '../update/check.js';
+import {
+  describeActionAliases,
+  isActionAlias,
+  isGroupedActionTool,
+  registerActionTools,
+  updateActionSuggestions,
+} from './action-tools.js';
 
 export interface PhotoshopMCPServerOptions {
   serverVersion: string;
+  advertiseLegacyTools?: boolean;
 }
 
 export class PhotoshopMCPServer {
@@ -73,7 +81,7 @@ export class PhotoshopMCPServer {
   private promptRegistry: PromptRegistry;
   private session: Session;
 
-  constructor(options: PhotoshopMCPServerOptions) {
+  constructor(private readonly options: PhotoshopMCPServerOptions) {
     this.logger = new Logger('PhotoshopMCPServer');
     this.toolRegistry = new ToolRegistry();
     this.promptRegistry = new PromptRegistry();
@@ -90,7 +98,7 @@ export class PhotoshopMCPServer {
           prompts: {},
           resources: {},
         },
-        instructions: buildPhotoshopInstructions(),
+        instructions: this.describeTools(buildPhotoshopInstructions()),
       }
     );
 
@@ -121,10 +129,6 @@ export class PhotoshopMCPServer {
     );
 
     const connection = this.session.getConnection();
-
-    void ensureUxpBridgeServer().catch((err) => {
-      this.logger.debug('UXP bridge server not started:', err);
-    });
 
     this.registerToolDefinitions(createDocumentTools(connection));
     this.registerToolDefinitions(createLayerTools(connection));
@@ -157,16 +161,32 @@ export class PhotoshopMCPServer {
     this.registerToolDefinitions(createPathTools(connection));
     this.registerToolDefinitions(createShapeTools(connection));
     this.registerToolDefinitions(createLayoutTools(connection));
+    registerActionTools(this.toolRegistry);
 
     this.logger.info(
-      `Registered ${this.toolRegistry.count()} tools and ${this.promptRegistry.count()} prompts`
+      `Advertising ${this.getToolCount()} tools and ${this.promptRegistry.count()} prompts`
     );
+  }
+
+  private describeTools(text: string): string {
+    return this.options.advertiseLegacyTools ? text : describeActionAliases(text);
+  }
+
+  listTools() {
+    if (this.options.advertiseLegacyTools) {
+      return this.toolRegistry.list().filter(({ name }) => !isGroupedActionTool(name));
+    }
+    return this.toolRegistry.list()
+      .filter(({ name }) => !isActionAlias(name))
+      .map((tool) => tool.description
+        ? { ...tool, description: this.describeTools(tool.description) }
+        : tool);
   }
 
   private setupHandlers() {
     this.server.setRequestHandler(ListToolsRequestSchema, async () => {
       this.logger.debug('Listing available tools');
-      return { tools: this.toolRegistry.list() };
+      return { tools: this.listTools() };
     });
 
     this.server.setRequestHandler(ListPromptsRequestSchema, async () => {
@@ -187,7 +207,13 @@ export class PhotoshopMCPServer {
       const args = (request.params.arguments as Record<string, string>) || {};
       this.logger.debug(`Prompt requested: ${name}`);
       recordMcpPromptRequest(name, this.promptRegistry.count());
-      return await this.promptRegistry.get(name, args);
+      const prompt = await this.promptRegistry.get(name, args);
+      return {
+        ...prompt,
+        messages: prompt.messages.map((message) => message.content.type === 'text'
+          ? { ...message, content: { ...message.content, text: this.describeTools(message.content.text) } }
+          : message),
+      };
     });
 
     this.server.setRequestHandler(CallToolRequestSchema, async (request) => {
@@ -199,7 +225,9 @@ export class PhotoshopMCPServer {
         const args = (request.params.arguments as Record<string, unknown>) || {};
         const result = await this.toolRegistry.execute(toolName, args);
         this.session.updateActivity();
-        return result;
+        return this.options.advertiseLegacyTools || isActionAlias(toolName)
+          ? result
+          : updateActionSuggestions(result);
       } catch (error) {
         if (error instanceof Error && error.message.startsWith('Tool not found:')) {
           recordMcpToolCall({
@@ -239,7 +267,7 @@ export class PhotoshopMCPServer {
   }
 
   getToolCount(): number {
-    return this.toolRegistry.count();
+    return this.listTools().length;
   }
 
   async getPhotoshopVersion(): Promise<string | undefined> {
@@ -256,6 +284,9 @@ export class PhotoshopMCPServer {
 
   async start() {
     await this.session.initialize();
+    void ensureUxpBridgeServer().catch((err) => {
+      this.logger.debug('UXP bridge server not started:', err);
+    });
 
     this.server.oninitialized = () => {
       onMcpClientConnected(this.server.getClientVersion());

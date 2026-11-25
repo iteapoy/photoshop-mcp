@@ -44,6 +44,25 @@ npm run verify:photoshop-prompts
 npm run verify:pack       # packed tarball ESM imports resolve (issue #38)
 ```
 
+### Tool catalog A/B evaluation
+
+The cases live in `scripts/fixtures/tool-catalog-cases.ts`. Keep this evaluation
+outside `tests/` because live model calls are billed and can vary between runs.
+The runner loads both tool catalogs from the server and compares them with the
+same model, system prompt, and Photoshop task. No Photoshop tool call is executed.
+
+```bash
+npm run eval:tool-catalog -- --dry-run
+npm run eval:tool-catalog -- --case translate-layer
+npm run eval:tool-catalog -- --model gpt-4.1-mini
+```
+
+Set `OPENAI_API_KEY` in the environment for live runs. The dry run validates the
+expected calls in both catalogs. Live runs report first-pass success, successful
+calls after at most one retry, retry counts, and model-reported input tokens.
+Each case expects one tool call with the requested target and arguments, so
+these results measure tool selection and argument construction.
+
 ### UXP bridge plugin (Neural Filters)
 
 Neural Filters (`photoshop_neural_filter`) require the companion plugin in `uxp-plugin/`:

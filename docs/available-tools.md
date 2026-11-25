@@ -1,8 +1,39 @@
 # Available Tools
 
-**132 tools total** — 115 atomic `photoshop_*` tools plus 17 recipe `photoshop_recipe_*` workflows (single undo step each).
+The default MCP catalog advertises **29 entries**. Nineteen tools group related operations by `action`. The 17 workflows are available through two grouped recipe tools and the standalone `photoshop_recipe_remove_background` tool. The original tool names below remain callable for compatibility. The standalone Web UI continues to advertise its existing 132-tool catalog for the intent router and planner.
 
-Reference for all atomic `photoshop_*` MCP tools exposed by this server (parameters, examples, and return shapes).
+| MCP tool | Actions |
+| --- | --- |
+| `photoshop_document` | `create`, `open`, `get_info`, `list`, `set_active`, `save`, `close`, `resize_image`, `crop`, `flatten`, `stack_images` |
+| `photoshop_layer` | `create`, `list`, `select`, `update`, `duplicate`, `delete`, `translate`, `scale`, `rotate`, `reorder`, `rasterize`, `merge_visible`, `place_image`, `fit_to_document`, `fill`, `fill_gradient`, `apply_style`, `content_aware_fill`, `create_shape` |
+| `photoshop_text` | `create`, `get`, `update_content`, `set_style`, `set_ranges` |
+| `photoshop_history` | `list`, `undo`, `redo`, `save_snapshot`, `revert_to_state` |
+| `photoshop_group` | `create`, `move_layers_into_group`, `ungroup` |
+| `photoshop_artboard` | `list`, `create`, `set_active`, `export` |
+| `photoshop_selection` | `get_bounds`, `rectangle`, `ellipse`, `subject`, `select_all`, `deselect`, `invert`, `expand`, `contract`, `feather`, `save` |
+| `photoshop_mask` | `create_from_selection`, `delete`, `bake_into_layer`, `apply_gradient`, `create_clipping`, `release_clipping` |
+| `photoshop_smart_object` | `convert`, `replace_contents`, `edit_contents`, `duplicate_independent` |
+| `photoshop_filter` | `gaussian_blur`, `sharpen`, `noise`, `motion_blur`, `high_pass`, `smart_blur` |
+| `photoshop_path` | `create`, `stroke`, `fill`, `delete` |
+| `photoshop_layout` | `align`, `distribute`, `duplicate_array` |
+| `photoshop_color` | `brightness_contrast`, `hue_saturation`, `auto_levels`, `auto_contrast`, `desaturate`, `invert`, `create_adjustment_layer` |
+| `photoshop_dataset` | `list`, `import`, `generate` |
+| `photoshop_export` | `document_or_artboard`, `layer` |
+| `photoshop_ai` | `fill`, `remove`, `expand`, `upscale`, `replace_sky`, `generate_image`, `neural_filter` |
+| `photoshop_font` | `list`, `install` |
+| `photoshop_recipe_edit` | `enhance_portrait`, `frequency_separation`, `dodge_burn`, `remove_distraction`, `apply_color_grade`, `gradient_fade`, `sky_blend`, `sticker_outline`, `organize_layers` |
+| `photoshop_recipe_output` | `prepare_for_web`, `export_social_variants`, `split_carousel`, `passport_photo`, `batch_mockup_replace`, `batch_watermark`, `csv_to_cards` |
+
+```javascript
+photoshop_layer({ action: "translate", document_id: 7, layer_id: 42, deltaX: 24, deltaY: 0 })
+photoshop_group({ action: "move_layers_into_group", document_id: 7, layer_ids: [42], group_id: 81 })
+```
+
+`translate` changes a layer's pixel position on the canvas. `move_layers_into_group` changes its parent in the Layers panel. `reorder` controls stacking order. For `layer.update`, provide one property per call from `name`, `opacity`, `blendMode`, `visible`, and `locked`.
+
+`layer.select` activates a layer by exact `name` or `layer_id`. `layer.rasterize` converts one layer to pixels. `layer.merge_visible` combines all visible layers in the target document and keeps hidden layers. `document.flatten` leaves one Background layer and discards hidden layers.
+
+Use `selection.subject` to select pixels and `mask.create_from_selection` to create an editable mask from those pixels. `mask.delete` keeps the layer pixels, while `mask.bake_into_layer` permanently removes pixels hidden by the mask.
 
 ← Back to [README](../README.md)
 

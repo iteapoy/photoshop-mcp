@@ -206,7 +206,7 @@ export function createColorAdjustmentTools(connection: PhotoshopConnection): Too
     tool: {
       name: 'photoshop_create_adjustment_layer',
       description:
-        'Create an editable adjustment layer. Choose type and supply only parameters supported by that type. Query photoshop_schema for the complete per-type schemas.',
+        'Create an editable adjustment layer. Choose type and supply only parameters supported by that type.',
       inputSchema: {
         type: 'object',
         properties: {

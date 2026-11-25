@@ -1,6 +1,6 @@
 # photoshop-mcp
 
-> MCP server for Adobe Photoshop — 1.7.18 — 132 tools (generative AI + 17 recipes), standalone web UI, and state-aware agent workflows. Unofficial; not affiliated with Adobe.
+> MCP server for Adobe Photoshop with grouped actions, generative AI, 17 recipes, a standalone web UI, and state-aware agent workflows. Unofficial; not affiliated with Adobe.
 
 **Website:** https://photoshop-mcp.com/
 **llms.txt (site):** https://photoshop-mcp.com/llms.txt
@@ -48,9 +48,10 @@ claude mcp add photoshop -- npx -y @alisaitteke/photoshop-mcp
 
 ## Tool surface
 
-- **132 tools** — 115 atomic + 17 recipe (`photoshop_recipe_*`)
+- **29 entries in the default MCP catalog**. The 17 workflows are available through `photoshop_recipe_remove_background`, `photoshop_recipe_edit`, and `photoshop_recipe_output`. The Web UI uses the 132-tool legacy catalog.
+- **Grouped actions** - `photoshop_document`, `photoshop_layer`, `photoshop_text`, `photoshop_history`, `photoshop_group`, `photoshop_artboard`, `photoshop_selection`, `photoshop_mask`, `photoshop_smart_object`, `photoshop_filter`, `photoshop_path`, and `photoshop_layout`. Use `layer.translate` for canvas pixel offsets and `group.move_layers_into_group` for Layers panel nesting. Legacy names are callable for compatibility.
 - **24 MCP prompts** — `ps.remove_background`, `ps.enhance_portrait`, `ps.generative_fill`, …
-- **Generative AI** — fill, remove, expand, upscale, sky replacement, generate image (Adobe account)
+- **Additional action groups** - `photoshop_color` for color and adjustment layers, `photoshop_dataset` for Variables and Data Sets, `photoshop_export` for single-file exports, `photoshop_ai` for generative AI, Sky Replacement, and Neural Filters, and `photoshop_font` to list or install fonts.
 - **State** — `photoshop_get_state`, `photoshop_get_preview`, `photoshop_get_capabilities`
 - **Standalone UI** — Action Plan (beta): plan all steps in one LLM call, then execute
 - **Jev intent routing (opt-in)** — with `TYPESAFE_API_KEY`, the Web UI asks Jev (TypeSafe AI's System One model) to route each prompt; 26 safe commands and recipes (undo, opacity, blend mode, remove background, color grade, split carousel, …), or a short chain of them, run with no LLM call
