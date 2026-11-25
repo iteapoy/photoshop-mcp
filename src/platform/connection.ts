@@ -20,6 +20,14 @@ export class PhotoshopConnection {
   private photoshopInfo: PhotoshopInfo | null = null;
   private macosExecutor?: MacOSExecutor;
   private onFreshDetect?: (ok: boolean) => void;
+  /**
+   * Cached "is Photoshop running" probe. On Windows this shells out to
+   * `tasklist` (~250ms) on every call; on macOS it runs pgrep. A script
+   * execution via the COM/AppleScript bridge already fails fast when the app
+   * is gone, so re-checking on every short-lived tool call is pure overhead.
+   * Cache the positive result briefly and let the executor refresh it.
+   */
+  private runningCache: { at: number; value: boolean } | null = null;
 
   constructor() {
     this.logger = new Logger('PhotoshopConnection');
@@ -67,6 +75,39 @@ export class PhotoshopConnection {
 
   private notifyFreshDetect(ok: boolean): void {
     this.onFreshDetect?.(ok);
+  }
+
+  /**
+   * Running-state check with a short TTL. `force` bypasses the cache after we
+   * launch or after a bridge error suggests the app may have exited.
+   */
+  private async isRunningCached(executor: ScriptExecutor, force = false): Promise<boolean> {
+    const ttl = this.runningCacheTtlMs();
+    const now = Date.now();
+    if (!force && ttl > 0 && this.runningCache && now - this.runningCache.at < ttl) {
+      return this.runningCache.value;
+    }
+    const value = await executor.isPhotoshopRunning();
+    this.runningCache = { at: Date.now(), value };
+    return value;
+  }
+
+  private runningCacheTtlMs(): number {
+    const raw = process.env.PHOTOSHOP_RUNNING_CACHE_MS?.trim();
+    if (raw !== undefined) {
+      const parsed = Number.parseInt(raw, 10);
+      if (Number.isFinite(parsed)) return Math.max(0, parsed);
+    }
+    return 10_000;
+  }
+
+  /** Errors that mean Photoshop exited, so a cached "running" is now stale. */
+  private static readonly NOT_RUNNING_PATTERN =
+    /not running|isn't running|is not running|photoshop not found|-600|prohibit|programmatic access/i;
+
+  /** Invalidate the cached running state (e.g. after launching Photoshop). */
+  invalidateRunningCache(): void {
+    this.runningCache = null;
   }
 
   private applyCachedInfo(cached: { version: string; path: string; appName?: string }): void {
@@ -141,17 +182,29 @@ export class PhotoshopConnection {
       const executor = this.getExecutor();
       this.applyMacOSTarget();
 
-      const isRunning = await executor.isPhotoshopRunning();
+      const isRunning = await this.isRunningCached(executor);
       if (!isRunning) {
         if (options?.launch === false) {
           throw new Error('Photoshop is not running');
         }
         this.logger.info('Photoshop not running, launching...');
         await executor.launchPhotoshop(this.photoshopInfo.path);
+        // The launch needs time to come up; drop the stale "not running" so the
+        // next probe reflects reality instead of reusing a cached false.
+        this.invalidateRunningCache();
       }
 
-      const result = await executor.execute(script, timeout);
-      return result;
+      try {
+        return await executor.execute(script, timeout);
+      } catch (error) {
+        // If the bridge says Photoshop is gone, the cached "running" is stale.
+        // Drop it so the next call re-probes and can auto-launch if allowed.
+        const message = error instanceof Error ? error.message : String(error);
+        if (PhotoshopConnection.NOT_RUNNING_PATTERN.test(message)) {
+          this.invalidateRunningCache();
+        }
+        throw error;
+      }
     } catch (error) {
       this.logger.error('Script execution failed:', error);
       throw error;
@@ -170,10 +223,11 @@ export class PhotoshopConnection {
 
     const executor = this.getExecutor();
     this.applyMacOSTarget();
-    const isRunning = await executor.isPhotoshopRunning();
+    const isRunning = await this.isRunningCached(executor);
     if (!isRunning) {
       this.logger.info('Launching Photoshop...');
       await executor.launchPhotoshop(this.photoshopInfo.path);
+      this.invalidateRunningCache();
     }
   }
 

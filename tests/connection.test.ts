@@ -95,4 +95,39 @@ describe('PhotoshopConnection on macOS', () => {
     await connection.ensurePhotoshopRunning();
     expect(seenAppNames).toEqual(['Adobe Photoshop 2026']);
   });
+
+  it('reuses the running-state probe across consecutive script calls', async () => {
+    let probes = 0;
+    vi.spyOn(MacOSExecutor.prototype, 'isPhotoshopRunning').mockImplementation(async () => {
+      probes++;
+      return true;
+    });
+    const connection = new PhotoshopConnection();
+    await connection.executeScript('return 1;');
+    await connection.executeScript('return 2;');
+    await connection.executeScript('return 3;');
+    // One tasklist/pgrep on the first call, none after (within the TTL).
+    expect(probes).toBe(1);
+  });
+
+  it('re-probes after a bridge error reports Photoshop is not running', async () => {
+    let probes = 0;
+    vi.spyOn(MacOSExecutor.prototype, 'isPhotoshopRunning').mockImplementation(async () => {
+      probes++;
+      return true;
+    });
+    let call = 0;
+    vi.spyOn(MacOSExecutor.prototype, 'execute').mockImplementation(async () => {
+      call++;
+      if (call === 1) throw new Error('Photoshop is not running');
+      return 'ok';
+    });
+    const connection = new PhotoshopConnection();
+    await expect(connection.executeScript('return 1;', undefined, { launch: false })).rejects.toThrow(
+      /not running/i
+    );
+    await connection.executeScript('return 2;', undefined, { launch: false });
+    // Error invalidated the cached "running"; second call probes again.
+    expect(probes).toBe(2);
+  });
 });

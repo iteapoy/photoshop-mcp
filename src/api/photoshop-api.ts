@@ -32,24 +32,6 @@ export interface PhotoshopAPI {
   getAPIType(): APIType;
 }
 
-/**
- * createAPI() runs per tool call, and in auto mode the bridge probe exists
- * only to pick truthful log wording (the outcome is always ExtendScript).
- * Cache it briefly so the hot path does not pay a self-HTTP roundtrip on
- * every call.
- */
-const PROBE_CACHE_TTL_MS = 5000;
-let cachedPluginProbe: { at: number; value: boolean } | null = null;
-
-async function probePluginOnce(): Promise<boolean> {
-  if (cachedPluginProbe && Date.now() - cachedPluginProbe.at < PROBE_CACHE_TTL_MS) {
-    return cachedPluginProbe.value;
-  }
-  const value = await isUxpBridgeReachable();
-  cachedPluginProbe = { at: Date.now(), value };
-  return value;
-}
-
 export class PhotoshopAPIFactory {
   private logger: Logger;
   private connection: PhotoshopConnection;
@@ -99,16 +81,11 @@ export class PhotoshopAPIFactory {
       );
     }
 
-    const pluginPolling = await probePluginOnce();
-    if (pluginPolling) {
-      this.logger.debug(
-        `Using ExtendScript for version ${version}; UXP bridge plugin detected and polling — neural filters available, but tool scripts still require ExtendScript`
-      );
-    } else {
-      this.logger.debug(
-        `Using ExtendScript for version ${version} (UXP plugin not polling the bridge)`
-      );
-    }
+    // In auto mode the probe never changes the outcome: tool scripts always
+    // run through ExtendScript. Skipping it avoids a self-HTTP /health roundtrip
+    // (and lazily booting the bridge server) on the hot path of every call.
+    // Neural-filter tools probe the bridge themselves when actually invoked.
+    this.logger.debug(`Using ExtendScript for version ${version} (auto mode)`);
     return 'ExtendScript';
   }
 }
