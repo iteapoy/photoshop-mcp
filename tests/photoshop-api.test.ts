@@ -68,3 +68,13 @@ describe('PhotoshopAPIFactory (issue #57)', () => {
     expect(api.getAPIType()).toBe('UXP');
   });
 });
+
+
+describe('missing Photoshop during cold initialization', () => {
+  it('attempts detection and fails before executing a script', async () => {
+    let detections=0,executions=0;
+    const connection={getPhotoshopInfo:()=>null,getVersion:async()=>{detections++;return 'Unknown';},executeScript:async()=>{executions++;return 'unused';}} as unknown as PhotoshopConnection;
+    await expect(new PhotoshopAPIFactory(connection).createAPI()).rejects.toThrow('Photoshop not found');
+    expect(detections).toBe(1);expect(executions).toBe(0);
+  });
+});

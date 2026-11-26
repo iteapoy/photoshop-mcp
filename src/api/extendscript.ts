@@ -1,3 +1,4 @@
+import { nativeGradientScript, type GradientOptions } from './gradient.js';
 import { nativePathStrokeScript, type PathStrokeOptions } from './path-stroke.js';
 /**
  * Helper functions for ExtendScript API
@@ -1698,52 +1699,6 @@ export const ExtendScriptSnippets = {
   `,
 
   /**
-   * Save document as PSD
-   */
-  saveAsPSD: (path: string) => `
-    if (app.documents.length === 0) {
-      throw new Error('No active document');
-    }
-    var doc = app.activeDocument;
-    var saveFile = new File("${path.replace(/\\/g, '\\\\')}");
-    var psdOptions = new PhotoshopSaveOptions();
-    psdOptions.embedColorProfile = true;
-    doc.saveAs(saveFile, psdOptions, true);
-    return { path: saveFile.fsName };
-  `,
-
-  /**
-   * Save document as JPEG
-   */
-  saveAsJPEG: (path: string, quality = 8) => `
-    if (app.documents.length === 0) {
-      throw new Error('No active document');
-    }
-    var doc = app.activeDocument;
-    var saveFile = new File("${path.replace(/\\/g, '\\\\')}");
-    var jpegOptions = new JPEGSaveOptions();
-    jpegOptions.quality = ${quality};
-    jpegOptions.embedColorProfile = true;
-    doc.saveAs(saveFile, jpegOptions, true);
-    return { path: saveFile.fsName };
-  `,
-
-  /**
-   * Save document as PNG
-   */
-  saveAsPNG: (path: string) => `
-    if (app.documents.length === 0) {
-      throw new Error('No active document');
-    }
-    var doc = app.activeDocument;
-    var saveFile = new File("${path.replace(/\\/g, '\\\\')}");
-    var pngOptions = new PNGSaveOptions();
-    pngOptions.compression = 9;
-    doc.saveAs(saveFile, pngOptions, true);
-    return { path: saveFile.fsName };
-  `,
-
-  /**
    * Close active document
    */
   closeDocument: (save = false) => `
@@ -1889,146 +1844,12 @@ export const ExtendScriptSnippets = {
     };
   `,
 
-  /**
-   * Two-color linear gradient on the active layer's pixels (not the mask).
-   * Document.gradients does not exist in ExtendScript; this uses the gradient tool action.
-   */
-  fillLinearGradient: (
-    fromRed: number,
-    fromGreen: number,
-    fromBlue: number,
-    toRed: number,
-    toGreen: number,
-    toBlue: number,
-    direction: 'left_to_right' | 'right_to_left' | 'top_to_bottom' | 'bottom_to_top',
-    layerName?: string
-  ) => {
-    const axis = {
-      left_to_right: { fromH: 0, fromV: 50, toH: 100, toV: 50 },
-      right_to_left: { fromH: 100, fromV: 50, toH: 0, toV: 50 },
-      top_to_bottom: { fromH: 50, fromV: 0, toH: 50, toV: 100 },
-      bottom_to_top: { fromH: 50, fromV: 100, toH: 50, toV: 0 },
-    }[direction];
-    return `
+  /** Native multi-stop gradient; target activation and painting run atomically. */
+  fillGradient: (options: GradientOptions, layerName = '') => `
     ${helperFunctions}
-    if (app.documents.length === 0) {
-      throw new Error('No active document');
-    }
-    var doc = app.activeDocument;
-
-    ${layerName === undefined ? '' : `
-    var targetName = ${JSON.stringify(layerName)};
-    var matches = [];
-    function findFillTarget(container) {
-      for (var i = 0; i < container.layers.length; i++) {
-        var candidate = container.layers[i];
-        if (candidate.name === targetName) matches.push(candidate);
-        if (candidate.typename === 'LayerSet') findFillTarget(candidate);
-      }
-    }
-    findFillTarget(doc);
-    if (matches.length === 0) throw new Error('Layer not found: ' + targetName);
-    if (matches.length > 1) throw new Error('Ambiguous layer name: ' + targetName);
-    if (matches[0].typename !== 'ArtLayer') throw new Error('Cannot fill a layer group');
-    if (matches[0].allLocked) throw new Error('Cannot fill a fully locked layer: ' + targetName);
-    if (matches[0].kind === LayerKind.TEXT) throw new Error('Cannot fill a text layer: ' + targetName);
-    doc.activeLayer = matches[0];
-    `}
-    var layer = doc.activeLayer;
-    if (!layer) throw new Error('No active layer');
-    if (layer.allLocked) {
-      throw new Error('Cannot fill a fully locked layer: ' + layer.name);
-    }
-    if (layer.kind === LayerKind.TEXT) {
-      throw new Error('Cannot fill a text layer. Rasterize it first.');
-    }
-    if (layer.isBackgroundLayer) {
-      layer.isBackgroundLayer = false;
-    }
-
-    app.displayDialogs = DialogModes.NO;
-    var docW = doc.width.as('px');
-    var docH = doc.height.as('px');
-    var fromX = docW * (${axis.fromH} / 100.0);
-    var fromY = docH * (${axis.fromV} / 100.0);
-    var toX = docW * (${axis.toH} / 100.0);
-    var toY = docH * (${axis.toV} / 100.0);
-
-    var hadSelection = false;
-    try { hadSelection = doc.selection.bounds != null; } catch (eSel) { hadSelection = false; }
-    if (!hadSelection) doc.selection.selectAll();
-
-    function __mcp_gradPoint(x, y) {
-      var desc = new ActionDescriptor();
-      desc.putUnitDouble(cTID('Hrzn'), cTID('#Pxl'), x);
-      desc.putUnitDouble(cTID('Vrtc'), cTID('#Pxl'), y);
-      return desc;
-    }
-    function __mcp_gradRgb(r, g, b) {
-      var desc = new ActionDescriptor();
-      desc.putDouble(cTID('Rd  '), r);
-      desc.putDouble(cTID('Grn '), g);
-      desc.putDouble(cTID('Bl  '), b);
-      return desc;
-    }
-    function __mcp_gradStop(location, r, g, b) {
-      var desc = new ActionDescriptor();
-      desc.putInteger(cTID('Lctn'), location);
-      desc.putInteger(cTID('Mdpn'), 50);
-      desc.putObject(cTID('Clr '), cTID('RGBC'), __mcp_gradRgb(r, g, b));
-      desc.putEnumerated(cTID('Type'), cTID('Clry'), cTID('UsrS'));
-      return desc;
-    }
-
-    var args = new ActionDescriptor();
-    args.putObject(cTID('From'), cTID('Pnt '), __mcp_gradPoint(fromX, fromY));
-    args.putObject(cTID('T   '), cTID('Pnt '), __mcp_gradPoint(toX, toY));
-    args.putEnumerated(cTID('Md  '), cTID('BlnM'), cTID('Nrml'));
-    args.putEnumerated(cTID('Type'), cTID('GrdT'), cTID('Lnr '));
-    args.putBoolean(cTID('Dthr'), true);
-    args.putBoolean(cTID('UsMs'), false);
-    args.putBoolean(cTID('Rvrs'), false);
-
-    var gradDesc = new ActionDescriptor();
-    gradDesc.putString(cTID('Nm  '), 'Custom');
-    gradDesc.putEnumerated(cTID('GrdF'), cTID('GrdF'), cTID('CstS'));
-    gradDesc.putDouble(cTID('Intr'), 4096.0);
-
-    var colorList = new ActionList();
-    colorList.putObject(cTID('Clrt'), __mcp_gradStop(0, ${fromRed}, ${fromGreen}, ${fromBlue}));
-    colorList.putObject(cTID('Clrt'), __mcp_gradStop(4096, ${toRed}, ${toGreen}, ${toBlue}));
-    gradDesc.putList(cTID('Clrs'), colorList);
-
-    var xferList = new ActionList();
-    var xferA = new ActionDescriptor();
-    xferA.putInteger(cTID('Lctn'), 0);
-    xferA.putInteger(cTID('Mdpn'), 50);
-    xferA.putUnitDouble(cTID('Opct'), cTID('#Prc'), 100.0);
-    xferList.putObject(cTID('TrnS'), xferA);
-    var xferB = new ActionDescriptor();
-    xferB.putInteger(cTID('Lctn'), 4096);
-    xferB.putInteger(cTID('Mdpn'), 50);
-    xferB.putUnitDouble(cTID('Opct'), cTID('#Prc'), 100.0);
-    xferList.putObject(cTID('TrnS'), xferB);
-    gradDesc.putList(cTID('Trns'), xferList);
-
-    args.putObject(cTID('Grad'), cTID('Grdn'), gradDesc);
-    executeAction(cTID('Grdn'), args, DialogModes.NO);
-
-    if (!hadSelection) {
-      try { doc.selection.deselect(); } catch (eDeselect) {}
-    }
-
-    return {
-      filled: true,
-      layerName: layer.name,
-      layer_id: layer.id,
-      direction: '${direction}',
-      from: { red: ${fromRed}, green: ${fromGreen}, blue: ${fromBlue} },
-      to: { red: ${toRed}, green: ${toGreen}, blue: ${toBlue} }
-    };
-  `;
-  },
+    ${layerTargetHelpers}
+    ${nativeGradientScript(options, layerName)}
+  `,
 
   /**
    * Resize image

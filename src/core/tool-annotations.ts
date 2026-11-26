@@ -169,6 +169,7 @@ export const TOOL_ANNOTATIONS: Record<string, PhotoshopToolAnnotations> = {
   photoshop_recipe_passport_photo: edit(false),
   photoshop_recipe_csv_to_cards: edit(false),
   photoshop_recipe_sticker_outline: edit(true),
+  photoshop_recipe_verify_version: edit(false),
 
   photoshop_create_group: edit(false),
   photoshop_move_layers_to_group: edit(false),

@@ -15,7 +15,7 @@
 
 **Prerequisites:** Photoshop running on Windows or macOS, Node.js 18+. This is unofficial and not affiliated with Adobe.
 
-**Tool surface:** 132 MCP tools — 115 atomic `photoshop_*` + 17 recipe `photoshop_recipe_*`; 24 MCP prompt templates (`ps.*`).
+**Tool surface:** 133 MCP tools — 115 atomic `photoshop_*` + 18 recipe `photoshop_recipe_*`; 25 MCP prompt templates (`ps.*`).
 
 ## Architecture (agent view)
 
@@ -40,7 +40,7 @@ Follow the server `instructions` advertised on MCP `initialize` ([src/prompts/in
 ```
 1. DISCOVER: tools/list + prompts/list (or get_capabilities once per session)
 2. STATE:    photoshop_get_state before mutating; photoshop_get_preview after major steps
-3. ACT:      prefer photoshop_recipe_* for multi-step outcomes (single undo step)
+3. ACT:      prefer photoshop_recipe_* for multi-step outcomes (editing recipes group history; verification preserves source)
 4. RECOVER:  on error, read structured envelope (code, suggested_next_tool) → get_state → retry one step
 ```
 
@@ -58,6 +58,7 @@ Follow the server `instructions` advertised on MCP `initialize` ([src/prompts/in
 | Mixed fonts/colors in one text layer | `photoshop_set_text_ranges` |
 | Read existing type (content, font, size, tracking) | `photoshop_get_text` |
 | Align, even spacing, ring/step arrays | `photoshop_align_layers`, `photoshop_distribute_layers`, `photoshop_duplicate_array` |
+| Save version, preview and pixel comparison | `photoshop_recipe_output` action `verify_version` |
 | One layer out as its own file | `photoshop_export_layer` |
 
 Full catalog: [docs/available-tools.md](docs/available-tools.md). Prompt layer: [docs/prompt-layer.md](docs/prompt-layer.md).

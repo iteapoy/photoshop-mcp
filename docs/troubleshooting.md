@@ -149,3 +149,12 @@ Enable detailed logging by setting `LOG_LEVEL=0`:
   }
 }
 ```
+
+### Cold connection recovery
+
+`get_state` and other script tools lazily resolve Photoshop information; a prior
+`ping` is not required. Concurrent first calls share one detection. Missing or
+unavailable Photoshop is classified as `photoshop_unreachable` and recommends
+`photoshop_ping`, rather than a loop back to `get_state`. A failed mutation is
+never automatically replayed. Timeout recovery still waits for ping to succeed
+before issuing more edits.

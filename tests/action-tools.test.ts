@@ -69,7 +69,7 @@ describe('grouped MCP actions', () => {
     expect(compact).toHaveLength(29);
     expect(compact.filter(({ name }) => name.startsWith('photoshop_recipe_')).map(({ name }) => name))
       .toEqual(['photoshop_recipe_remove_background', 'photoshop_recipe_edit', 'photoshop_recipe_output']);
-    expect(legacy).toHaveLength(132);
+    expect(legacy).toHaveLength(133);
     expect(legacy.filter(({ name }) => name.startsWith('photoshop_recipe_')).map(({ name }) => name))
       .toEqual(PHOTOSHOP_RECIPE_TOOL_NAMES);
   });

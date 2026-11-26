@@ -1,3 +1,4 @@
+import { verifyVersionTemplate } from './templates/verify-version.js';
 import type { PromptRegistry } from '../core/prompt-registry.js';
 import { toPromptDefinition } from './_shared.js';
 import { enhancePortraitTemplate } from './templates/enhance-portrait.js';
@@ -60,6 +61,7 @@ export const PHOTOSHOP_PROMPT_TEMPLATES = [
   passportPhotoTemplate,
   csvToCardsTemplate,
   stickerOutlineTemplate,
+  verifyVersionTemplate,
 ] as const;
 
 export function registerPhotoshopPrompts(registry: PromptRegistry): void {

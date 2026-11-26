@@ -131,3 +131,30 @@ describe('PhotoshopConnection on macOS', () => {
     expect(probes).toBe(2);
   });
 });
+
+describe('cold API initialization', () => {
+  it('initializes on the first get_state without requiring a ping', async () => {
+    const { PhotoshopAPIFactory } = await import('../src/api/photoshop-api.js');
+    const home=mkdtempSync(join(tmpdir(),'ps-cold-api-'));const old=process.env.PHOTOSHOP_MCP_HOME;process.env.PHOTOSHOP_MCP_HOME=home;
+    try {
+      const connection=new PhotoshopConnection();
+      expect(connection.getPhotoshopInfo()).toBeNull();
+      const api=await new PhotoshopAPIFactory(connection).createAPI();
+      expect(api.getAPIType()).toBe('ExtendScript');expect(connection.getPhotoshopInfo()?.version).toBe('27.9.1');
+    }finally{if(old===undefined)delete process.env.PHOTOSHOP_MCP_HOME;else process.env.PHOTOSHOP_MCP_HOME=old;rmSync(home,{recursive:true,force:true});}
+  });
+  it('shares concurrent cold detection and reports missing Photoshop with a ping recovery hint', async () => {
+    const { PhotoshopAPIFactory }=await import('../src/api/photoshop-api.js');
+    const { classifyError }=await import('../src/errors/envelope.js');
+    const { PhotoshopDetector }=await import('../src/platform/detector.js');
+    const home=mkdtempSync(join(tmpdir(),'ps-cold-concurrent-'));const old=process.env.PHOTOSHOP_MCP_HOME;process.env.PHOTOSHOP_MCP_HOME=home;
+    try {
+      const detector=vi.spyOn(PhotoshopDetector.prototype,'detect');
+      const connection=new PhotoshopConnection();
+      await Promise.all([new PhotoshopAPIFactory(connection).createAPI(),new PhotoshopAPIFactory(connection).createAPI()]);
+      expect(detector).toHaveBeenCalledOnce();detector.mockRestore();
+      const missing=classifyError('Photoshop info not available. Please detect Photoshop first.');
+      expect(missing.code).toBe('photoshop_unreachable');expect(missing.suggested_next_tool).toBe('photoshop_ping');
+    }finally{if(old===undefined)delete process.env.PHOTOSHOP_MCP_HOME;else process.env.PHOTOSHOP_MCP_HOME=old;rmSync(home,{recursive:true,force:true});}
+  });
+});

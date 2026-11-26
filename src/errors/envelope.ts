@@ -53,11 +53,13 @@ const ERROR_PATTERNS: Array<{
   code: PhotoshopErrorCode;
   suggested_next_tool?: string;
 }> = [
+  { pattern: /photoshop info not available|detect Photoshop first|photoshop not found|photoshop is not running|failed to detect photoshop/i, code: 'photoshop_unreachable', suggested_next_tool: 'photoshop_ping' },
   { pattern: /ambiguous_name|Ambiguous layer name/i, code: 'ambiguous_name', suggested_next_tool: 'photoshop_get_layers' },
   { pattern: /非法参数|应为枚举值|invalid (?:argument|parameter)|number: (?:1200|1220|1224)\b/i,
     code: 'invalid_arguments' },
   { pattern: /不是函数|is not a function|undefined is not an object|unsupported api/i,
     code: 'unsupported_api' },
+  { pattern: /document state:/i, code: 'document_state' },
   { pattern: /当前不可用|currently (?:not available|unavailable)|number: -25920\b/i,
     code: 'document_state', suggested_next_tool: 'photoshop_get_state' },
   { pattern: /number: 1302\b/i, code: 'extendscript_runtime_error' },

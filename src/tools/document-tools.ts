@@ -1,3 +1,6 @@
+import { mkdir, realpath } from 'node:fs/promises';
+import { dirname, extname, isAbsolute } from 'node:path';
+import { documentSaveScript, type DocumentSaveOptions } from '../api/document-save.js';
 import { ToolDefinition, ToolResult } from '../core/tool-registry.js';
 import { PhotoshopConnection } from '../platform/connection.js';
 import { PhotoshopAPIFactory } from '../api/photoshop-api.js';
@@ -124,11 +127,12 @@ export function createDocumentTools(connection: PhotoshopConnection): ToolDefini
           'Save the active document to disk in PSD, JPEG, or PNG format.\n\n' +
           'Use when: user requests export/save with a specific path and format.\n' +
           'Do NOT use when: web-optimized resize+sharpen pipeline is needed — use photoshop_recipe_prepare_for_web.\n\n' +
-          'Returns: confirmation with saved path and format.\n' +
-          'Preconditions: active document; path required. Side effects: writes file to disk.',
+          'Returns: actual file path, format, as_copy, and document id/name/path/saved state.\n' +
+          'Preconditions: active document and absolute path with matching extension. Side effects: saves and rebinds the document by default; as_copy=true writes a copy and preserves source path/dirty state. Layered JPEG/PNG requires as_copy=true.',
         inputSchema: {
           type: 'object',
           properties: {
+            as_copy: { type: 'boolean', default: false, description: 'False saves and rebinds the document; true writes a copy without changing its path/dirty state.' },
             path: {
               type: 'string',
               description: 'Full path where to save the document',
@@ -387,50 +391,28 @@ async function getDocumentInfo(connection: PhotoshopConnection): Promise<ToolRes
   }
 }
 
-async function saveDocument(
-  connection: PhotoshopConnection,
-  args: Record<string, unknown>
-): Promise<ToolResult> {
-  const path = args.path as string;
-  const format = (args.format as string) || 'PSD';
-  const quality = (args.quality as number) || 8;
-
-  try {
-    const apiFactory = new PhotoshopAPIFactory(connection);
-    const api = await apiFactory.createAPI();
-
-    let script;
-    switch (format.toUpperCase()) {
-      case 'JPEG':
-        script = ExtendScriptSnippets.saveAsJPEG(path, quality);
-        break;
-      case 'PNG':
-        script = ExtendScriptSnippets.saveAsPNG(path);
-        break;
-      default:
-        script = ExtendScriptSnippets.saveAsPSD(path);
-    }
-    await api.executeScript(script);
-
-    return {
-      content: [
-        {
-          type: 'text' as const,
-          text: `Document saved as ${format} to: ${path}`,
-        },
-      ],
-    };
-  } catch (error) {
-    return {
-      content: [
-        {
-          type: 'text' as const,
-          text: `Error saving document: ${error instanceof Error ? error.message : String(error)}`,
-        },
-      ],
-      isError: true,
-    };
+async function saveDocument(connection: PhotoshopConnection, args: Record<string, unknown>): Promise<ToolResult> {
+  const path = typeof args.path === 'string' ? args.path.trim() : '';
+  const format = args.format ?? 'PSD', quality = args.quality ?? 8;
+  const extensions: Record<string, string[]> = { PSD: ['.psd'], JPEG: ['.jpg', '.jpeg'], PNG: ['.png'] };
+  if (!path || !isAbsolute(path) || typeof format !== 'string' || !extensions[format]?.includes(extname(path).toLowerCase()) ||
+      typeof quality !== 'number' || !Number.isInteger(quality) || quality < 1 || quality > 12 ||
+      (args.as_copy !== undefined && typeof args.as_copy !== 'boolean')) {
+    return atomicFailure({ ok: false, code: 'invalid_arguments', message: 'Save requires an absolute path with matching PSD/JPEG/PNG extension, quality 1–12, and boolean as_copy' });
   }
+  try {
+    await mkdir(dirname(path), { recursive: true });
+    const raw = await runSnippet(connection, documentSaveScript({ path, format, quality, as_copy: args.as_copy === true } as DocumentSaveOptions));
+    const result = parseSnippetResult(raw);
+    if (!result) throw new Error('Unparseable document save result');
+    const writtenPath = await realpath(String(result.path));
+    const document = result.document as { path?: string; saved?: boolean } | undefined;
+    if (args.as_copy !== true && (!document?.path || !document.saved || await realpath(document.path) !== writtenPath)) {
+      throw new Error('Document state: Photoshop saved a copy instead of rebinding the source; use PSD or as_copy:true');
+    }
+    result.path = writtenPath;
+    return atomicSuccess(args.as_copy === true ? 'Document copy saved' : 'Document saved', result, 'photoshop_get_state');
+  } catch (error) { return atomicFailureFromError(error); }
 }
 
 async function closeDocument(

@@ -62,9 +62,9 @@ Routes, thresholds and the off switch:
 - 🎞️ **Make carousels** — split one wide design into seamless, numbered slides
 - 💧 **Watermark in bulk** — a whole folder of photos in one go, originals untouched
 - 🎨 **Color grade & more** — film looks, sky replacement, generative fill (Adobe account required)
-- ⏪ **Stay safe** — every multi-step "recipe" is a single undo step in Photoshop
+- ⏪ **Stay safe** — editing recipes group changes into one undo step; version verification preserves the source and consumes none
 
-The default MCP catalog has 29 entries. Its 17 workflows are available through
+The default MCP catalog has 29 entries. Its 18 workflows are available through
 three recipe tools: remove background, edit, and output. The full reference is in
 [`docs/available-tools.md`](docs/available-tools.md).
 

@@ -40,7 +40,7 @@ When LLMs call Photoshop one command at a time, they burn tokens, guess layer ty
 
 **What I built (open source)**
 
-- **Photoshop MCP** — 132 tools incl. 17 recipe workflows (single-undo outcomes)
+- **Photoshop MCP** — 133 tools incl. 18 recipe workflows (outcome workflows)
 
 > `images/og-social.png` is generated: `npx playwright install chromium` once, then
 > `npx tsx scripts/generate-og-image.ts`. It reads the tool counts from
@@ -67,6 +67,6 @@ Feedback and contributors welcome. If your team builds agent tooling or creative
 
 Set in repository **About** sidebar:
 
-- **Description:** `MCP server + local UI for AI-driven Photoshop automation. 132 tools, recipe workflows, cross-platform.`
+- **Description:** `MCP server + local UI for AI-driven Photoshop automation. 133 tools, recipe workflows, cross-platform.`
 - **Website:** `https://alisait.com`
 - **Topics:** `mcp`, `model-context-protocol`, `typescript`, `ai-agents`, `photoshop`, `automation`, `vue`, `hono`, `developer-tools`, `cursor`, `claude`, `extendscript`

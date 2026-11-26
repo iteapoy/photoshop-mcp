@@ -20,6 +20,7 @@ export class PhotoshopConnection {
   private photoshopInfo: PhotoshopInfo | null = null;
   private macosExecutor?: MacOSExecutor;
   private onFreshDetect?: (ok: boolean) => void;
+  private detecting: Promise<PhotoshopInfo | null> | null = null;
   /**
    * Cached "is Photoshop running" probe. On Windows this shells out to
    * `tasklist` (~250ms) on every call; on macOS it runs pgrep. A script
@@ -121,6 +122,13 @@ export class PhotoshopConnection {
 
   private async resolvePhotoshopInfo(): Promise<PhotoshopInfo | null> {
     if (this.photoshopInfo) return this.photoshopInfo;
+    if (this.detecting) return this.detecting;
+    this.detecting = this.detectPhotoshopInfo();
+    try { return await this.detecting; }
+    finally { this.detecting = null; }
+  }
+
+  private async detectPhotoshopInfo(): Promise<PhotoshopInfo | null> {
 
     const cached = readPhotoshopDetectCache();
     if (cached) {

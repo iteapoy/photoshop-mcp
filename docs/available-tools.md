@@ -1,6 +1,6 @@
 # Available Tools
 
-The default MCP catalog advertises **29 entries**. Nineteen tools group related operations by `action`. The 17 workflows are available through two grouped recipe tools and the standalone `photoshop_recipe_remove_background` tool. The original tool names below remain callable for compatibility. The standalone Web UI continues to advertise its existing 132-tool catalog for the intent router and planner.
+The default MCP catalog advertises **29 entries**. Nineteen tools group related operations by `action`. The 18 workflows are available through two grouped recipe tools and the standalone `photoshop_recipe_remove_background` tool. The original tool names below remain callable for compatibility. The standalone Web UI continues to advertise its existing 133-tool catalog for the intent router and planner.
 
 | MCP tool | Actions |
 | --- | --- |
@@ -1494,3 +1494,64 @@ nine individual adjustment-layer tools, `set_text_style` replaces font/color/
 alignment setters, `reorder_layer` replaces five stacking-order tools, and
 `create_group` with optional `layer_ids` replaces `group_layers`. Old tool names
 and group actions are rejected; no aliases or legacy schema discovery remain.
+
+### Multi-stop gradients
+
+`photoshop_layer` action `fill_gradient` (raw handler `photoshop_fill_gradient`)
+now requires `from: {x,y}`, `to: {x,y}`, and `color_stops` in canvas pixels.
+`type` is `linear` (default), `radial` (from is the center), or `reflected`.
+Each color stop has normalized `position` (0..1) and `red`, `green`, `blue` (0..255).
+Optional independent `opacity_stops` have `position` and `opacity` (0..100).
+Both ramps need 2..64 ordered stops including 0 and 1. Optional `midpoint`
+is 0.01..0.99 (default 0.5). Stops must map to distinct Photoshop 1/4096 locations.
+`reverse` defaults false; `dither` defaults true. Target by `layer_id` or unique
+`layer_name`; omit for active layer. Existing selection is respected and preserved.
+Transparent stops composite over existing pixels; use an empty pixel layer for
+transparent output, or a gradient mask to fade existing content. Locked, group,
+and non-pixel targets are rejected. Background layers cannot receive transparency.
+The former six RGB endpoints and named direction parameters have been removed.
+
+```json
+{"action":"fill_gradient","layer_id":42,"type":"radial","from":{"x":600,"y":600},"to":{"x":900,"y":600},"color_stops":[{"position":0,"red":255,"green":255,"blue":255},{"position":0.4,"red":90,"green":180,"blue":255},{"position":1,"red":190,"green":80,"blue":150}],"opacity_stops":[{"position":0,"opacity":100},{"position":1,"opacity":0}]}
+```
+
+### Normal save and copy save
+
+`photoshop_document` action `save` (`photoshop_save_document`) accepts `as_copy`
+(default false). Normal saving binds the tab to the requested file and clears
+the dirty state. `as_copy:true` writes a file while preserving the source path
+and dirty state. A layered document requires PSD for normal saving; JPEG/PNG
+exports of a layered document require `as_copy:true`. `path` must be absolute
+and have the corresponding `.psd`, `.jpg`/`.jpeg`, or `.png` extension.
+Results include actual file path, format, copy mode, and before/after document
+id, name, path, and saved state. PSD options explicitly retain layers.
+
+### Save and verify a version
+
+Use `photoshop_recipe_output` with `action:"verify_version"` (raw handler
+`photoshop_recipe_verify_version`). Optional `series` is a stable identifier
+(1..64 letters/digits/underscores/hyphens); use the same explicit series to
+compare duplicated documents. Without it, saved documents use a source-path
+hash and unsaved documents use a process-local document series.
+
+One call creates a new directory under `exports[/<chat-id>]/versions/<series>/`
+with an optional layered PSD copy (`save_psd:true` by default), full-resolution
+`current.png`, `preview.png`, labeled `comparison.png`, `report.json`, and
+`difference.png` when a pixel comparison is possible. The source tab, file
+binding, dirty state, and history are preserved. No follow-up save/preview is needed.
+
+The first call establishes the baseline. Later successful versions report
+changed pixel count/ratio, maximum and mean channel difference, and exclusive
+right/bottom bounds. `pixel_threshold` defaults 0 (0..255 integer). Comparison
+uses full-resolution sRGB 8-bit visible renders, premultiplied RGB plus alpha;
+RGB below zero alpha is ignored. It does not compare PSD structure or original
+16-bit values. Dimensions that differ produce `dimensions_changed`, not a
+resampled pixel diff. `max_dimension_px` (128..2048, default 1024) affects only
+the preview. Documents must be RGB 8/16-bit and at most 32 million pixels.
+
+The baseline advances only after all artifacts and the report are complete.
+A per-series filesystem lock prevents concurrent baseline races. If a process
+crashes, remove its `.lock` only after confirming that no verification is running.
+Failure results include `verification_stage`. Stage timings separate document
+inspection, Photoshop capture, and local image processing. Version files are
+external artifacts and are not removed by Photoshop Undo.

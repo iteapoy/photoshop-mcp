@@ -1,3 +1,4 @@
+import { bindVerifyVersion } from './verify-version.js';
 import type { ToolDefinition } from '../../core/tool-registry.js';
 import type { PhotoshopConnection } from '../../platform/connection.js';
 import { bindRemoveBackground } from './remove-background.js';
@@ -37,6 +38,7 @@ export function createRecipeTools(connection: PhotoshopConnection): ToolDefiniti
     bindPassportPhoto(connection),
     bindCsvToCards(connection),
     bindStickerOutline(connection),
+    bindVerifyVersion(connection),
   ];
 }
 
@@ -58,4 +60,5 @@ export const PHOTOSHOP_RECIPE_TOOL_NAMES = [
   'photoshop_recipe_passport_photo',
   'photoshop_recipe_csv_to_cards',
   'photoshop_recipe_sticker_outline',
+  'photoshop_recipe_verify_version',
 ] as const;

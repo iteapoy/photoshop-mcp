@@ -42,11 +42,12 @@ export class PhotoshopAPIFactory {
   }
 
   async createAPI(): Promise<PhotoshopAPI> {
-    const info = this.connection.getPhotoshopInfo();
-
+    let info = this.connection.getPhotoshopInfo();
     if (!info) {
-      throw new Error('Photoshop info not available. Please detect Photoshop first.');
+      await this.connection.getVersion();
+      info = this.connection.getPhotoshopInfo();
     }
+    if (!info) throw new Error('Photoshop not found on this system; start Photoshop and retry photoshop_ping');
 
     // Determine which API to use based on version
     const apiType = await this.determineAPIType(info.version);

@@ -38,7 +38,7 @@ const groups = {
       'rasterize converts one layer to pixels. merge_visible combines all visible layers in the document and keeps hidden layers. ' +
       'Use photoshop_flatten_image for a single Background layer. ' +
       'place_image inserts a file as a layer. fit_to_document scales a layer to fit the canvas. ' +
-      'fill paints a solid color; fill_gradient paints a gradient. apply_style sets one layer effect ' +
+      'fill paints a solid color; fill_gradient supports multi-color and opacity stops with linear, radial, or reflected geometry. apply_style sets one layer effect ' +
       'such as a shadow, glow, stroke, or bevel and can replace existing effects. ' +
       'content_aware_fill fills the current pixel selection from surrounding content, then deselects it. ' +
       'create_shape adds an editable vector shape layer with optional fill and stroke.',
@@ -279,8 +279,9 @@ const groups = {
       'export_social_variants exports platform-specific sizes; split_carousel slices a design into ' +
       'consecutive slides. passport_photo crops and exports an ID photo. batch_mockup_replace swaps ' +
       'Smart Object contents and exports each variant. batch_watermark marks and exports a folder of ' +
-      'images. csv_to_cards exports designs from CSV rows.',
+      'images. csv_to_cards exports designs from CSV rows. verify_version saves a layered copy and lossless render, then returns a preview, before/after sheet and full-resolution pixel comparison with the previous successful version in the series.',
     actions: {
+      verify_version: ['photoshop_recipe_verify_version'],
       prepare_for_web: ['photoshop_recipe_prepare_for_web'],
       export_social_variants: ['photoshop_recipe_export_social_variants'],
       split_carousel: ['photoshop_recipe_split_carousel'],

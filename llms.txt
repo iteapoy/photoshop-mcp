@@ -1,6 +1,6 @@
 # photoshop-mcp
 
-> MCP server for Adobe Photoshop with grouped actions, generative AI, 17 recipes, a standalone web UI, and state-aware agent workflows. Unofficial; not affiliated with Adobe.
+> MCP server for Adobe Photoshop with grouped actions, generative AI, 18 recipes, a standalone web UI, and state-aware agent workflows. Unofficial; not affiliated with Adobe.
 
 **Website:** https://photoshop-mcp.com/
 **llms.txt (site):** https://photoshop-mcp.com/llms.txt
@@ -24,7 +24,7 @@ npx -p @alisaitteke/photoshop-mcp ui
 get_capabilities → get_state → (recipe or atomic tool) → get_preview to verify
 ```
 
-Prefer `photoshop_recipe_*` for multi-step outcomes (single undo step). Use atomic `photoshop_*` tools for fine-grained edits. On failure, read structured error envelopes (`code`, `suggested_next_tool`) and call `get_state` before retrying.
+Prefer `photoshop_recipe_*` for multi-step outcomes. Editing recipes group undo history; verify_version saves artifacts without editing the source. Use atomic `photoshop_*` tools for fine-grained edits. On failure, read structured error envelopes (`code`, `suggested_next_tool`) and call `get_state` before retrying.
 
 ## MCP client configuration
 
@@ -48,9 +48,9 @@ claude mcp add photoshop -- npx -y @alisaitteke/photoshop-mcp
 
 ## Tool surface
 
-- **29 entries in the default MCP catalog**. The 17 workflows are available through `photoshop_recipe_remove_background`, `photoshop_recipe_edit`, and `photoshop_recipe_output`. The Web UI uses the 132-tool legacy catalog.
+- **29 entries in the default MCP catalog**. The 18 workflows are available through `photoshop_recipe_remove_background`, `photoshop_recipe_edit`, and `photoshop_recipe_output`. The Web UI uses the 133-tool legacy catalog.
 - **Grouped actions** - `photoshop_document`, `photoshop_layer`, `photoshop_text`, `photoshop_history`, `photoshop_group`, `photoshop_artboard`, `photoshop_selection`, `photoshop_mask`, `photoshop_smart_object`, `photoshop_filter`, `photoshop_path`, and `photoshop_layout`. Use `layer.translate` for canvas pixel offsets and `group.move_layers_into_group` for Layers panel nesting. Legacy names are callable for compatibility.
-- **24 MCP prompts** — `ps.remove_background`, `ps.enhance_portrait`, `ps.generative_fill`, …
+- **25 MCP prompts** — `ps.remove_background`, `ps.enhance_portrait`, `ps.generative_fill`, …
 - **Additional action groups** - `photoshop_color` for color and adjustment layers, `photoshop_dataset` for Variables and Data Sets, `photoshop_export` for single-file exports, `photoshop_ai` for generative AI, Sky Replacement, and Neural Filters, and `photoshop_font` to list or install fonts.
 - **State** — `photoshop_get_state`, `photoshop_get_preview`, `photoshop_get_capabilities`
 - **Standalone UI** — Action Plan (beta): plan all steps in one LLM call, then execute

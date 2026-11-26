@@ -34,8 +34,8 @@ Update notice (UPDATE_AVAILABLE)
 - If ping has no \`UPDATE_AVAILABLE\`, do not bring up updates.
 
 Session bootstrap
-- Call \`photoshop_ping\` exactly once at the start of a session to verify the
-  connection. Do not repeat it on every turn.
+- Tools lazily detect Photoshop; a prior \`photoshop_ping\` is not required.
+  Use ping to diagnose connection failures or confirm that a busy scripting queue is responsive.
 - Before suggesting AI-powered features (Generative Fill, Generative Upscale,
   Select Subject v2, neural filters, etc.), call \`photoshop_get_capabilities\`
   once to learn which features the user's installed Photoshop version exposes.
@@ -56,9 +56,15 @@ State before action
   sparingly — once per major step, not per atomic tool. Pass \`document_id\`
   to snapshot a background tab.
 
+Version verification
+- Use \`photoshop_recipe_verify_version\` to save a layered copy, lossless render,
+  preview, before/after sheet and pixel report in one call. Reuse an explicit
+  series across duplicated documents. It preserves the source document and does
+  not consume history states. Do not follow it with redundant save/preview calls.
+
 Recipe tools over atomic chains
 - When the request matches a recipe, call the matching \`photoshop_recipe_*\`
-  tool instead of composing 5+ atomic calls. A recipe is one undo step.
+  tool instead of composing 5+ atomic calls. Editing recipes group changes in history; verification/output workflows may consume none.
 - Phrase-to-tool mapping, degrade paths, and disambiguation are in the
   photoshop-recipes skill on plugin installs. Without that skill, call
   prompts/list and the matching ps.* prompt.

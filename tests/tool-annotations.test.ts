@@ -55,7 +55,7 @@ describe('tool annotations', () => {
     const names = [...descriptions.keys()].sort();
     const annotated = Object.keys(TOOL_ANNOTATIONS).sort();
     expect(annotated).toEqual(names);
-    expect(names).toHaveLength(132);
+    expect(names).toHaveLength(133);
   });
 
   it('keeps read-only tools non-destructive', () => {

@@ -63,15 +63,16 @@ const RECIPE_TO_PROMPT: Record<string, string> = {
   photoshop_recipe_passport_photo: 'ps.passport_photo',
   photoshop_recipe_csv_to_cards: 'ps.csv_to_cards',
   photoshop_recipe_sticker_outline: 'ps.sticker_outline',
+  photoshop_recipe_verify_version: 'ps.verify_version',
 };
 
 const promptNames = new Set(PHOTOSHOP_PROMPT_TEMPLATES.map((p) => p.name));
 const guidePromptNames = new Set<string>(PHOTOSHOP_GUIDE_PROMPT_NAMES);
 
-assert.equal(PHOTOSHOP_RECIPE_TOOL_NAMES.length, 17);
-assert.equal(Object.keys(RECIPE_TO_PROMPT).length, 17);
+assert.equal(PHOTOSHOP_RECIPE_TOOL_NAMES.length, 18);
+assert.equal(Object.keys(RECIPE_TO_PROMPT).length, 18);
 assert.equal(PHOTOSHOP_GUIDE_PROMPT_NAMES.length, 7);
-assert.equal(PHOTOSHOP_PROMPT_TEMPLATES.length, 24);
+assert.equal(PHOTOSHOP_PROMPT_TEMPLATES.length, 25);
 
 for (const recipeName of PHOTOSHOP_RECIPE_TOOL_NAMES) {
   const promptName = RECIPE_TO_PROMPT[recipeName];

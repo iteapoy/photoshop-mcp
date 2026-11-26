@@ -1,3 +1,4 @@
+import { GRADIENT_PROPERTIES, parseGradientArgs } from '../api/gradient.js';
 import { ToolDefinition, ToolResult } from '../core/tool-registry.js';
 import { PhotoshopConnection } from '../platform/connection.js';
 import { PhotoshopAPIFactory } from '../api/photoshop-api.js';
@@ -214,44 +215,18 @@ export function createLayerTools(connection: PhotoshopConnection): ToolDefinitio
       tool: {
         name: 'photoshop_fill_gradient',
         description:
-          'Paint a two-color linear gradient on a named layer, or the active layer when layer_name is omitted.\n\n' +
-          'Use when: the user asks for a color gradient, blend, or "mavi yeşil" style ramp on a layer.\n' +
-          'Do NOT use when: a flat color is enough — use photoshop_fill_layer.\n' +
-          'Do NOT use when: the gradient should fade the layer into the background — use photoshop_recipe_gradient_fade.\n' +
-          'Do NOT use when: you would write ExtendScript. Document.gradients does not exist.\n\n' +
-          'Returns: the two colors and direction applied.\n' +
-          'Preconditions: active document and an unlocked non-text layer. Side effects: overwrites those pixels, one history step. The same colors on the same pixels are idempotent. Reversible with photoshop_undo.',
+          'Paint a multi-color linear, radial, or reflected gradient with independent opacity stops. Coordinates are canvas pixels.\n' +
+          'Use when: color ramps, optical color separation, or radial light falloff.\n' +
+          'Do NOT use when: a flat fill is enough — use photoshop_fill_layer. Use photoshop_apply_gradient_mask to fade existing pixels.\n' +
+          'Preconditions: unlocked pixel layer. Transparency requires a non-background layer. Side effects: composites gradient pixels into the current selection or canvas; transparent stops preserve existing pixels. Use an empty layer for transparent output.',
         inputSchema: {
           type: 'object',
           properties: {
-            layer_name: {
-              type: 'string',
-              minLength: 1,
-              description: 'Exact target layer name, including nested groups. Duplicate names return an error. Omit to use the active layer.',
-            },
-            fromRed: { type: 'number', description: 'Start red (0-255)', minimum: 0, maximum: 255 },
-            fromGreen: {
-              type: 'number',
-              description: 'Start green (0-255)',
-              minimum: 0,
-              maximum: 255,
-            },
-            fromBlue: {
-              type: 'number',
-              description: 'Start blue (0-255)',
-              minimum: 0,
-              maximum: 255,
-            },
-            toRed: { type: 'number', description: 'End red (0-255)', minimum: 0, maximum: 255 },
-            toGreen: { type: 'number', description: 'End green (0-255)', minimum: 0, maximum: 255 },
-            toBlue: { type: 'number', description: 'End blue (0-255)', minimum: 0, maximum: 255 },
-            direction: {
-              type: 'string',
-              description: 'Gradient axis. Default left_to_right.',
-              enum: ['left_to_right', 'right_to_left', 'top_to_bottom', 'bottom_to_top'],
-            },
+            layer_name: { type: 'string', minLength: 1, description: 'Unique target name; omit for active layer. Use layer_id for duplicate names.' },
+            ...GRADIENT_PROPERTIES,
           },
-          required: ['fromRed', 'fromGreen', 'fromBlue', 'toRed', 'toGreen', 'toBlue'],
+          required: ['from', 'to', 'color_stops'],
+          additionalProperties: false,
         },
       },
       handler: async (args) => fillGradient(connection, args),
@@ -451,73 +426,21 @@ async function fillLayer(
 }
 
 function colorByte(value: unknown, label: string): number {
-  if (typeof value !== 'number' || !Number.isFinite(value)) {
-    throw new Error(`${label} must be a number from 0 to 255`);
-  }
+  if (typeof value !== 'number' || !Number.isFinite(value)) throw new Error(`${label} must be a number from 0 to 255`);
   return Math.max(0, Math.min(255, Math.round(value)));
 }
 
-async function fillGradient(
-  connection: PhotoshopConnection,
-  args: Record<string, unknown>
-): Promise<ToolResult> {
-  let fromRed: number;
-  let fromGreen: number;
-  let fromBlue: number;
-  let toRed: number;
-  let toGreen: number;
-  let toBlue: number;
+async function fillGradient(connection: PhotoshopConnection, args: Record<string, unknown>): Promise<ToolResult> {
+  let options;
+  try { options = parseGradientArgs(args); }
+  catch (error) { return atomicFailure({ ok: false, code: 'invalid_arguments', message: (error as Error).message }); }
   try {
-    fromRed = colorByte(args.fromRed, 'fromRed');
-    fromGreen = colorByte(args.fromGreen, 'fromGreen');
-    fromBlue = colorByte(args.fromBlue, 'fromBlue');
-    toRed = colorByte(args.toRed, 'toRed');
-    toGreen = colorByte(args.toGreen, 'toGreen');
-    toBlue = colorByte(args.toBlue, 'toBlue');
-  } catch (error) {
-    return {
-      content: [
-        {
-          type: 'text' as const,
-          text: `Error filling gradient: ${error instanceof Error ? error.message : String(error)}`,
-        },
-      ],
-      isError: true,
-    };
-  }
-  const direction =
-    args.direction === 'right_to_left' ||
-    args.direction === 'top_to_bottom' ||
-    args.direction === 'bottom_to_top'
-      ? args.direction
-      : 'left_to_right';
-
-  try {
-    const apiFactory = new PhotoshopAPIFactory(connection);
-    const api = await apiFactory.createAPI();
-    const script = ExtendScriptSnippets.fillLinearGradient(
-      fromRed,
-      fromGreen,
-      fromBlue,
-      toRed,
-      toGreen,
-      toBlue,
-      direction,
-      fillTargetName(args)
-    );
-    const raw = await api.executeScript(script);
-    return atomicSuccess('Gradient filled', parseSnippetResult(raw) ?? { result: raw });
-  } catch (error) {
-    return {
-      content: [
-        {
-          type: 'text' as const,
-          text: `Error filling gradient: ${error instanceof Error ? error.message : String(error)}`,
-        },
-      ],
-      isError: true,
-    };
-  }
+    const api = await new PhotoshopAPIFactory(connection).createAPI();
+    const raw = await api.executeScript(ExtendScriptSnippets.fillGradient(options, fillTargetName(args)));
+    const details = parseSnippetResult(raw);
+    if (!details) throw new Error('Unparseable gradient result');
+    return atomicSuccess('Gradient filled', details);
+  } catch (error) { return atomicFailureFromError(error); }
 }
 
 async function getLayers(
